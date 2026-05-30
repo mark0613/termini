@@ -20,6 +20,8 @@ pub enum AppError {
     Decryption,
     #[error("argon2 error: {0}")]
     Argon2(String),
+    #[error("ssh error: {0}")]
+    Ssh(String),
     #[error("vault not found")]
     VaultNotFound,
     #[error("credential not found")]
@@ -35,5 +37,11 @@ pub fn command_result<T>(result: AppResult<T>) -> Result<T, String> {
 impl From<argon2::Error> for AppError {
     fn from(error: argon2::Error) -> Self {
         Self::Argon2(error.to_string())
+    }
+}
+
+impl From<russh::Error> for AppError {
+    fn from(error: russh::Error) -> Self {
+        Self::Ssh(error.to_string())
     }
 }

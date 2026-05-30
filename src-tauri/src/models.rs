@@ -111,6 +111,58 @@ pub struct ImportVaultResult {
     pub profiles_imported: usize,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectSshInput {
+    pub profile_id: String,
+    pub cols: u32,
+    pub rows: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshWriteInput {
+    pub session_id: String,
+    pub data: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshResizeInput {
+    pub session_id: String,
+    pub cols: u32,
+    pub rows: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshSessionInput {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshSessionInfo {
+    pub session_id: String,
+    pub profile_id: String,
+    pub credential_id: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SshOutputEvent {
+    pub session_id: String,
+    pub data: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SshStatusEvent {
+    pub session_id: String,
+    pub status: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportFile {

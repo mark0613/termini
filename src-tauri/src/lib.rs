@@ -3,6 +3,7 @@ mod crypto;
 mod error;
 mod models;
 mod secrets;
+mod ssh;
 mod state;
 mod storage;
 
@@ -34,6 +35,11 @@ pub fn run() {
             commands::delete_profile,
             commands::export_vault,
             commands::import_vault,
+            commands::connect_ssh,
+            commands::write_ssh,
+            commands::resize_ssh,
+            commands::disconnect_ssh,
+            commands::send_profile_password,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
