@@ -1,49 +1,74 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
+const emptyConnections = [
+  "建立 vault 之後，SSH profiles 會出現在這裡。",
+  "選取 profile 會開新 tab 並連線。",
+  "sudo/password prompt helper 會在 terminal pane 內提示。",
+];
+
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
-
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
-
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark">T</span>
+          <div>
+            <h1>Termini</h1>
+            <p>Local SSH vault</p>
+          </div>
+        </div>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+        <section className="sidebar-section">
+          <div className="section-heading">
+            <h2>Vaults</h2>
+            <button type="button" aria-label="新增 vault">
+              +
+            </button>
+          </div>
+          <button type="button" className="vault-row is-active">
+            Personal
+          </button>
+        </section>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+        <section className="sidebar-section grow">
+          <div className="section-heading">
+            <h2>Connections</h2>
+            <button type="button" aria-label="新增 SSH profile">
+              +
+            </button>
+          </div>
+          <div className="empty-list">
+            {emptyConnections.map((item) => (
+              <p key={item}>{item}</p>
+            ))}
+          </div>
+        </section>
+      </aside>
+
+      <section className="workspace">
+        <header className="tabbar">
+          <button type="button" className="tab is-active">
+            Welcome
+          </button>
+          <button type="button" className="new-tab" aria-label="新增 tab">
+            +
+          </button>
+        </header>
+
+        <section className="terminal-area">
+          <div className="terminal-placeholder">
+            <h2>No active SSH session</h2>
+            <p>建立 vault 與 connection 後，terminal 會在這裡開啟。</p>
+          </div>
+        </section>
+
+        <footer className="statusbar">
+          <span>Disconnected</span>
+          <span>Alt+Shift+D split</span>
+          <span>Alt+Shift++ vertical</span>
+          <span>Alt+Shift+- horizontal</span>
+        </footer>
+      </section>
     </main>
   );
 }
