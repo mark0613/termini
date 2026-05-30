@@ -114,6 +114,7 @@ pub struct ImportVaultResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectSshInput {
+    pub session_id: String,
     pub profile_id: String,
     pub cols: u32,
     pub rows: u32,

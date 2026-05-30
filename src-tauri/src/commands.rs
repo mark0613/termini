@@ -144,7 +144,14 @@ pub async fn connect_ssh(
         let password = state.storage.get_password(&credential_id)?;
         state
             .ssh
-            .connect(app, profile, password, input.cols, input.rows)
+            .connect(
+                app,
+                input.session_id,
+                profile,
+                password,
+                input.cols,
+                input.rows,
+            )
             .await
     }
     .await;

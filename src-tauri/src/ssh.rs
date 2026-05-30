@@ -3,7 +3,6 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use russh::{client, ChannelMsg, ChannelWriteHalf, Disconnect};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 use crate::{
     error::{AppError, AppResult},
@@ -38,6 +37,7 @@ impl SshManager {
     pub async fn connect(
         &self,
         app: AppHandle,
+        session_id: String,
         profile: SshProfile,
         password: String,
         cols: u32,
@@ -46,7 +46,6 @@ impl SshManager {
         let credential_id = profile.credential_id.clone().ok_or_else(|| {
             AppError::InvalidInput("profile does not have a credential".to_string())
         })?;
-        let session_id = Uuid::new_v4().to_string();
 
         emit_status(
             &app,

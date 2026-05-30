@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Credential,
   ImportVaultResult,
+  SshSessionInfo,
   SshProfile,
   Vault,
 } from "./types";
@@ -88,4 +89,33 @@ export function exportVault(input: {
 
 export function importVault(input: { path: string; password: string }) {
   return invoke<ImportVaultResult>("import_vault", { input });
+}
+
+export function connectSsh(input: {
+  sessionId: string;
+  profileId: string;
+  cols: number;
+  rows: number;
+}) {
+  return invoke<SshSessionInfo>("connect_ssh", { input });
+}
+
+export function writeSsh(input: { sessionId: string; data: string }) {
+  return invoke<void>("write_ssh", { input });
+}
+
+export function resizeSsh(input: {
+  sessionId: string;
+  cols: number;
+  rows: number;
+}) {
+  return invoke<void>("resize_ssh", { input });
+}
+
+export function disconnectSsh(sessionId: string) {
+  return invoke<void>("disconnect_ssh", { input: { sessionId } });
+}
+
+export function sendProfilePassword(sessionId: string) {
+  return invoke<void>("send_profile_password", { input: { sessionId } });
 }

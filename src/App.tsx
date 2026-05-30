@@ -1,6 +1,20 @@
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import * as api from "./api";
-import type { Credential, SshProfile, Vault } from "./types";
+import { SplitWorkspace } from "./components/SplitWorkspace";
+import {
+  collectPanes,
+  createTab,
+  findFirstPane,
+  findPane,
+  removePane,
+  splitPane,
+  type SplitDirection,
+  type TerminalTab,
+  updatePane,
+  updatePaneBySession,
+} from "./terminalTree";
+import type { Credential, SshProfile, SshStatusEvent, Vault } from "./types";
 
 interface CredentialFormState {
   label: string;
@@ -16,12 +30,12 @@ interface ProfileFormState {
   credentialId: string;
 }
 
+const firstTab = createTab();
 const emptyCredentialForm: CredentialFormState = {
   label: "",
   username: "",
   password: "",
 };
-
 const emptyProfileForm: ProfileFormState = {
   name: "",
   host: "",
@@ -47,6 +61,8 @@ function App() {
   const [exportPassword, setExportPassword] = useState("");
   const [importPath, setImportPath] = useState("");
   const [importPassword, setImportPassword] = useState("");
+  const [tabs, setTabs] = useState<TerminalTab[]>([firstTab]);
+  const [activeTabId, setActiveTabId] = useState(firstTab.id);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Ready");
@@ -55,9 +71,35 @@ function App() {
     () => vaults.find((vault) => vault.id === activeVaultId) ?? null,
     [activeVaultId, vaults],
   );
+  const activeTab = useMemo(
+    () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0],
+    [activeTabId, tabs],
+  );
 
   useEffect(() => {
-    void refreshVaults();
+    void runAction(async () => {
+      await refreshVaults();
+    });
+  }, []);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    void listen<SshStatusEvent>("ssh-status", (event) => {
+      setTabs((current) =>
+        current.map((tab) => ({
+          ...tab,
+          root: updatePaneBySession(tab.root, event.payload.sessionId, (pane) => ({
+            ...pane,
+            status: event.payload.status,
+            message: event.payload.message,
+          })),
+        })),
+      );
+    }).then((handler) => {
+      unlisten = handler;
+    });
+
+    return () => unlisten?.();
   }, []);
 
   useEffect(() => {
@@ -70,8 +112,38 @@ function App() {
 
     const vault = vaults.find((item) => item.id === activeVaultId);
     setVaultName(vault?.name ?? "");
-    void refreshVaultData(activeVaultId);
+    void runAction(async () => {
+      await refreshVaultData(activeVaultId);
+    });
   }, [activeVaultId, vaults]);
+
+  useEffect(() => {
+    function handleShortcut(event: KeyboardEvent) {
+      if (!event.altKey || !event.shiftKey || !activeTab) return;
+
+      if (event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        splitActivePane(
+          window.innerWidth >= window.innerHeight ? "vertical" : "horizontal",
+        );
+        return;
+      }
+
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        splitActivePane("vertical");
+        return;
+      }
+
+      if (event.key === "-") {
+        event.preventDefault();
+        splitActivePane("horizontal");
+      }
+    }
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [activeTabId, activeTab?.activePaneId]);
 
   async function runAction(action: () => Promise<void>) {
     setIsBusy(true);
@@ -103,6 +175,133 @@ function App() {
     ]);
     setCredentials(nextCredentials);
     setProfiles(nextProfiles);
+  }
+
+  function updatePaneInTabs(
+    paneId: string,
+    updater: Parameters<typeof updatePane>[2],
+  ) {
+    setTabs((current) =>
+      current.map((tab) => ({
+        ...tab,
+        root: updatePane(tab.root, paneId, updater),
+      })),
+    );
+  }
+
+  function connectProfile(profile: SshProfile) {
+    const tab = createTab(profile);
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+  }
+
+  async function handlePaneReady(paneId: string, cols: number, rows: number) {
+    const tab = tabs.find((item) => findPane(item.root, paneId));
+    const pane = tab ? findPane(tab.root, paneId) : null;
+    if (!pane?.profileId || pane.sessionId || pane.status !== "pending") return;
+
+    const sessionId = crypto.randomUUID();
+    updatePaneInTabs(paneId, (current) => ({
+      ...current,
+      sessionId,
+      status: "connecting",
+      message: "Connecting...",
+    }));
+
+    try {
+      const session = await api.connectSsh({
+        sessionId,
+        profileId: pane.profileId,
+        cols,
+        rows,
+      });
+      updatePaneInTabs(paneId, (current) => ({
+        ...current,
+        sessionId: session.sessionId,
+        status: "connected",
+        message: null,
+      }));
+    } catch (err) {
+      updatePaneInTabs(paneId, (current) => ({
+        ...current,
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }
+
+  function splitActivePane(direction: SplitDirection) {
+    if (!activeTab) return;
+
+    setTabs((current) =>
+      current.map((tab) => {
+        if (tab.id !== activeTabId) return tab;
+        const result = splitPane(tab.root, tab.activePaneId, direction);
+        return {
+          ...tab,
+          root: result.node,
+          activePaneId: result.newPaneId ?? tab.activePaneId,
+        };
+      }),
+    );
+  }
+
+  function closePane(paneId: string) {
+    setTabs((current) => {
+      const nextTabs: TerminalTab[] = [];
+
+      for (const tab of current) {
+        const result = removePane(tab.root, paneId);
+        if (!result.removed) {
+          nextTabs.push(tab);
+          continue;
+        }
+
+        if (result.removed.sessionId) {
+          void api.disconnectSsh(result.removed.sessionId);
+        }
+
+        if (!result.node) continue;
+        const nextActive =
+          tab.activePaneId === paneId ? findFirstPane(result.node).id : tab.activePaneId;
+        nextTabs.push({ ...tab, root: result.node, activePaneId: nextActive });
+      }
+
+      if (nextTabs.length === 0) {
+        const tab = createTab();
+        setActiveTabId(tab.id);
+        return [tab];
+      }
+
+      if (!nextTabs.some((tab) => tab.id === activeTabId)) {
+        setActiveTabId(nextTabs[0].id);
+      }
+
+      return nextTabs;
+    });
+  }
+
+  function closeTab(tabId: string) {
+    setTabs((current) => {
+      const tab = current.find((item) => item.id === tabId);
+      if (tab) {
+        for (const pane of collectPanes(tab.root)) {
+          if (pane.sessionId) void api.disconnectSsh(pane.sessionId);
+        }
+      }
+
+      const remaining = current.filter((item) => item.id !== tabId);
+      if (remaining.length === 0) {
+        const next = createTab();
+        setActiveTabId(next.id);
+        return [next];
+      }
+
+      if (activeTabId === tabId) {
+        setActiveTabId(remaining[0].id);
+      }
+      return remaining;
+    });
   }
 
   function selectCredential(credential: Credential) {
@@ -157,7 +356,6 @@ function App() {
   async function handleSaveCredential(event: FormEvent) {
     event.preventDefault();
     if (!activeVault) return;
-
     await runAction(async () => {
       if (editingCredentialId) {
         await api.updateCredential({
@@ -291,11 +489,11 @@ function App() {
           </form>
         </section>
 
-        <section className="flex min-h-0 flex-1 flex-col p-3">
+        <section className="border-b border-[#25313c] p-3">
           <h2 className="mb-2 text-xs font-bold tracking-normal text-[#8fa1b2] uppercase">
             Vaults
           </h2>
-          <div className="grid gap-1 overflow-auto">
+          <div className="grid max-h-40 gap-1 overflow-auto">
             {vaults.map((vault) => (
               <button
                 key={vault.id}
@@ -312,73 +510,164 @@ function App() {
             ))}
           </div>
         </section>
+
+        <section className="flex min-h-0 flex-1 flex-col p-3">
+          <h2 className="mb-2 text-xs font-bold tracking-normal text-[#8fa1b2] uppercase">
+            Connections
+          </h2>
+          <div className="grid gap-2 overflow-auto">
+            {profiles.map((profile) => (
+              <div
+                key={profile.id}
+                className="grid gap-2 rounded-md border border-[#25313c] bg-[#10161d] p-2"
+              >
+                <button
+                  type="button"
+                  className="min-w-0 text-left"
+                  onClick={() => selectProfile(profile)}
+                >
+                  <span className="block truncate text-sm font-medium">
+                    {profile.name}
+                  </span>
+                  <span className="block truncate text-xs text-[#8fa1b2]">
+                    {profile.username}@{profile.host}:{profile.port}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="h-8 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-2 text-xs hover:bg-[#294b43]"
+                  onClick={() => connectProfile(profile)}
+                >
+                  Connect
+                </button>
+              </div>
+            ))}
+            {profiles.length === 0 ? (
+              <p className="rounded-md border border-dashed border-[#334353] p-3 text-sm text-[#8fa1b2]">
+                No SSH profiles yet.
+              </p>
+            ) : null}
+          </div>
+        </section>
       </aside>
 
       <section className="grid h-full min-w-0 grid-rows-[44px_minmax(0,1fr)_28px]">
-        <header className="flex items-end gap-1 border-b border-[#25313c] bg-[#151b22] px-2 pt-1.5">
+        <header className="flex items-end gap-1 overflow-hidden border-b border-[#25313c] bg-[#151b22] px-2 pt-1.5">
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={`flex h-9 min-w-32 max-w-56 items-center rounded-t-lg border border-b-0 border-[#25313c] ${
+                tab.id === activeTabId ? "bg-[#202b35]" : "bg-[#151b22]"
+              }`}
+            >
+              <button
+                type="button"
+                className="min-w-0 flex-1 cursor-pointer px-3 text-left text-sm"
+                onClick={() => setActiveTabId(tab.id)}
+              >
+                <span className="block truncate">{tab.title}</span>
+              </button>
+              <button
+                type="button"
+                className="h-full px-2 text-[#8fa1b2] hover:text-[#ffb8c0]"
+                onClick={() => closeTab(tab.id)}
+              >
+                x
+              </button>
+            </div>
+          ))}
           <button
             type="button"
-            className="h-9 min-w-36 max-w-64 cursor-pointer rounded-t-lg border border-b-0 border-[#25313c] bg-[#202b35] px-3 text-left text-sm"
+            className="mb-1 grid size-7 cursor-pointer place-items-center rounded-md border border-[#334353] bg-[#1d2731] hover:bg-[#263442]"
+            onClick={() => {
+              const tab = createTab();
+              setTabs((current) => [...current, tab]);
+              setActiveTabId(tab.id);
+            }}
+            aria-label="新增 tab"
           >
-            <span className="block truncate">
-              {activeVault?.name ?? "No vault"}
-            </span>
+            +
           </button>
         </header>
 
-        <section className="min-h-0 min-w-0 overflow-auto bg-[#0d1116] p-4">
-          <div className="mx-auto grid max-w-[1280px] gap-4">
-            {error ? (
-              <div className="rounded-md border border-[#7f3333] bg-[#321b1b] px-3 py-2 text-sm text-[#ffc9c9]">
-                {error}
-              </div>
+        <section className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_390px] gap-3 overflow-hidden bg-[#0d1116] p-3 max-[1180px]:grid-cols-1">
+          <div className="grid min-h-0 min-w-0 grid-rows-[36px_minmax(0,1fr)] gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="h-8 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-xs hover:bg-[#263442]"
+                onClick={() => splitActivePane("vertical")}
+              >
+                Split vertical
+              </button>
+              <button
+                type="button"
+                className="h-8 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-xs hover:bg-[#263442]"
+                onClick={() => splitActivePane("horizontal")}
+              >
+                Split horizontal
+              </button>
+            </div>
+            {activeTab ? (
+              <SplitWorkspace
+                node={activeTab.root}
+                activePaneId={activeTab.activePaneId}
+                onFocusPane={(paneId) =>
+                  setTabs((current) =>
+                    current.map((tab) =>
+                      tab.id === activeTabId ? { ...tab, activePaneId: paneId } : tab,
+                    ),
+                  )
+                }
+                onPaneReady={handlePaneReady}
+                onClosePane={closePane}
+              />
             ) : null}
+          </div>
 
-            <section className="grid gap-4 rounded-lg border border-[#25313c] bg-[#151b22] p-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <form className="flex min-w-72 flex-1 gap-2" onSubmit={handleSaveVault}>
-                  <label className="grid min-w-0 flex-1 gap-1 text-xs text-[#8fa1b2]">
-                    Vault name
-                    <input
-                      className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm text-[#e7edf3] outline-none focus:border-[#55c2a2]"
-                      value={vaultName}
-                      onChange={(event) => setVaultName(event.currentTarget.value)}
-                      disabled={!activeVault || isBusy}
-                    />
-                  </label>
+          <aside className="min-h-0 overflow-auto rounded-lg border border-[#25313c] bg-[#151b22] p-4">
+            <div className="grid gap-4">
+              {error ? (
+                <div className="rounded-md border border-[#7f3333] bg-[#321b1b] px-3 py-2 text-sm text-[#ffc9c9]">
+                  {error}
+                </div>
+              ) : null}
+
+              <form className="grid gap-2" onSubmit={handleSaveVault}>
+                <h2 className="text-sm font-semibold">Vault</h2>
+                <input
+                  className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                  value={vaultName}
+                  onChange={(event) => setVaultName(event.currentTarget.value)}
+                  disabled={!activeVault || isBusy}
+                  placeholder="Vault name"
+                />
+                <div className="flex gap-2">
                   <button
                     type="submit"
-                    className="h-10 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
+                    className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
                     disabled={!activeVault || isBusy}
                   >
                     Save
                   </button>
-                </form>
-                <button
-                  type="button"
-                  className="h-10 rounded-md border border-[#553238] bg-[#2a171b] px-3 text-sm text-[#ffb8c0] hover:bg-[#3a1f25] disabled:opacity-50"
-                  disabled={!activeVault || isBusy}
-                  onClick={handleDeleteVault}
-                >
-                  Delete vault
-                </button>
-              </div>
-            </section>
-
-            <div className="grid grid-cols-[minmax(280px,0.9fr)_minmax(360px,1.1fr)] gap-4 max-[1120px]:grid-cols-1">
-              <section className="grid min-h-0 gap-4 rounded-lg border border-[#25313c] bg-[#151b22] p-4">
-                <div>
-                  <h2 className="text-sm font-semibold">Credentials</h2>
-                  <p className="text-xs text-[#8fa1b2]">
-                    密碼存在 OS keychain，這裡只顯示 metadata。
-                  </p>
+                  <button
+                    type="button"
+                    className="h-9 rounded-md border border-[#553238] bg-[#2a171b] px-3 text-sm text-[#ffb8c0] hover:bg-[#3a1f25] disabled:opacity-50"
+                    disabled={!activeVault || isBusy}
+                    onClick={handleDeleteVault}
+                  >
+                    Delete
+                  </button>
                 </div>
+              </form>
 
+              <section className="grid gap-2">
+                <h2 className="text-sm font-semibold">Credentials</h2>
                 <div className="grid gap-2">
                   {credentials.map((credential) => (
                     <div
                       key={credential.id}
-                      className="grid gap-2 rounded-md border border-[#25313c] bg-[#10161d] p-3"
+                      className="rounded-md border border-[#25313c] bg-[#10161d] p-3"
                     >
                       <button
                         type="button"
@@ -392,7 +681,7 @@ function App() {
                           {credential.username}
                         </span>
                       </button>
-                      <div className="flex justify-between gap-2 text-xs">
+                      <div className="mt-2 flex justify-between gap-2 text-xs">
                         <span className="text-[#55c2a2]">
                           {credential.hasPassword ? "Password saved" : "No password"}
                         </span>
@@ -407,11 +696,6 @@ function App() {
                       </div>
                     </div>
                   ))}
-                  {credentials.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-[#334353] p-3 text-sm text-[#8fa1b2]">
-                      No credentials yet.
-                    </p>
-                  ) : null}
                 </div>
 
                 <form className="grid gap-2" onSubmit={handleSaveCredential}>
@@ -459,7 +743,7 @@ function App() {
                   <div className="flex gap-2">
                     <button
                       type="submit"
-                      className="h-10 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-3 text-sm hover:bg-[#294b43] disabled:opacity-50"
+                      className="h-9 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-3 text-sm hover:bg-[#294b43] disabled:opacity-50"
                       disabled={!activeVault || isBusy}
                     >
                       {editingCredentialId ? "Update" : "Create"}
@@ -467,7 +751,7 @@ function App() {
                     {editingCredentialId ? (
                       <button
                         type="button"
-                        className="h-10 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
+                        className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
                         onClick={() => {
                           setEditingCredentialId("");
                           setCredentialForm(emptyCredentialForm);
@@ -476,90 +760,46 @@ function App() {
                         Cancel
                       </button>
                     ) : null}
+                    {editingProfileId ? (
+                      <button
+                        type="button"
+                        className="h-9 rounded-md border border-[#553238] bg-[#2a171b] px-3 text-sm text-[#ffb8c0] hover:bg-[#3a1f25] disabled:opacity-50"
+                        onClick={() => handleDeleteProfile(editingProfileId)}
+                        disabled={isBusy}
+                      >
+                        Delete
+                      </button>
+                    ) : null}
                   </div>
                 </form>
               </section>
 
-              <section className="grid gap-4 rounded-lg border border-[#25313c] bg-[#151b22] p-4">
-                <div>
-                  <h2 className="text-sm font-semibold">SSH Profiles</h2>
-                  <p className="text-xs text-[#8fa1b2]">
-                    下一階段會把 profile 接到 SSH terminal session。
-                  </p>
-                </div>
-
-                <div className="grid gap-2">
-                  {profiles.map((profile) => {
-                    const credential = credentials.find(
-                      (item) => item.id === profile.credentialId,
-                    );
-                    return (
-                      <div
-                        key={profile.id}
-                        className="grid gap-2 rounded-md border border-[#25313c] bg-[#10161d] p-3"
-                      >
-                        <button
-                          type="button"
-                          className="min-w-0 text-left"
-                          onClick={() => selectProfile(profile)}
-                        >
-                          <span className="block truncate text-sm font-medium">
-                            {profile.name}
-                          </span>
-                          <span className="block truncate text-xs text-[#8fa1b2]">
-                            {profile.username}@{profile.host}:{profile.port}
-                          </span>
-                        </button>
-                        <div className="flex justify-between gap-2 text-xs">
-                          <span className="truncate text-[#8fa1b2]">
-                            {credential?.label ?? "No credential"}
-                          </span>
-                          <button
-                            type="button"
-                            className="text-[#ffb8c0] hover:text-[#ffd1d6]"
-                            onClick={() => handleDeleteProfile(profile.id)}
-                            disabled={isBusy}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {profiles.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-[#334353] p-3 text-sm text-[#8fa1b2]">
-                      No SSH profiles yet.
-                    </p>
-                  ) : null}
-                </div>
-
+              <section className="grid gap-2">
+                <h2 className="text-sm font-semibold">SSH Profile</h2>
                 <form className="grid gap-2" onSubmit={handleSaveProfile}>
-                  <h3 className="text-sm font-semibold">
-                    {editingProfileId ? "Edit profile" : "New profile"}
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2 max-[700px]:grid-cols-1">
-                    <input
-                      className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                      value={profileForm.name}
-                      onChange={(event) =>
-                        setProfileForm((current) => ({
-                          ...current,
-                          name: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="Profile name"
-                    />
-                    <input
-                      className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                      value={profileForm.username}
-                      onChange={(event) =>
-                        setProfileForm((current) => ({
-                          ...current,
-                          username: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="SSH username"
-                    />
+                  <input
+                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                    value={profileForm.name}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        name: event.currentTarget.value,
+                      }))
+                    }
+                    placeholder="Profile name"
+                  />
+                  <input
+                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                    value={profileForm.username}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({
+                        ...current,
+                        username: event.currentTarget.value,
+                      }))
+                    }
+                    placeholder="SSH username"
+                  />
+                  <div className="grid grid-cols-[minmax(0,1fr)_90px] gap-2">
                     <input
                       className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
                       value={profileForm.host}
@@ -604,7 +844,7 @@ function App() {
                   <div className="flex gap-2">
                     <button
                       type="submit"
-                      className="h-10 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-3 text-sm hover:bg-[#294b43] disabled:opacity-50"
+                      className="h-9 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-3 text-sm hover:bg-[#294b43] disabled:opacity-50"
                       disabled={!activeVault || isBusy}
                     >
                       {editingProfileId ? "Update" : "Create"}
@@ -612,7 +852,7 @@ function App() {
                     {editingProfileId ? (
                       <button
                         type="button"
-                        className="h-10 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
+                        className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
                         onClick={() => {
                           setEditingProfileId("");
                           setProfileForm(emptyProfileForm);
@@ -624,71 +864,65 @@ function App() {
                   </div>
                 </form>
               </section>
+
+              <section className="grid gap-2">
+                <h2 className="text-sm font-semibold">Import / Export</h2>
+                <form className="grid gap-2" onSubmit={handleExportVault}>
+                  <input
+                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                    value={exportPath}
+                    onChange={(event) => setExportPath(event.currentTarget.value)}
+                    placeholder="Export path"
+                  />
+                  <input
+                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                    value={exportPassword}
+                    onChange={(event) => setExportPassword(event.currentTarget.value)}
+                    placeholder="Export password"
+                    type="password"
+                  />
+                  <button
+                    type="submit"
+                    className="h-9 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
+                    disabled={!activeVault || isBusy}
+                  >
+                    Export
+                  </button>
+                </form>
+                <form className="grid gap-2" onSubmit={handleImportVault}>
+                  <input
+                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                    value={importPath}
+                    onChange={(event) => setImportPath(event.currentTarget.value)}
+                    placeholder="Import path"
+                  />
+                  <input
+                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                    value={importPassword}
+                    onChange={(event) => setImportPassword(event.currentTarget.value)}
+                    placeholder="Export password"
+                    type="password"
+                  />
+                  <button
+                    type="submit"
+                    className="h-9 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
+                    disabled={isBusy}
+                  >
+                    Import
+                  </button>
+                </form>
+              </section>
             </div>
-
-            <section className="grid grid-cols-2 gap-4 max-[1120px]:grid-cols-1">
-              <form
-                className="grid gap-2 rounded-lg border border-[#25313c] bg-[#151b22] p-4"
-                onSubmit={handleExportVault}
-              >
-                <h2 className="text-sm font-semibold">Encrypted export</h2>
-                <input
-                  className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                  value={exportPath}
-                  onChange={(event) => setExportPath(event.currentTarget.value)}
-                  placeholder="C:\\Users\\User\\Desktop\\termini-vault.json"
-                />
-                <input
-                  className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                  value={exportPassword}
-                  onChange={(event) => setExportPassword(event.currentTarget.value)}
-                  placeholder="Export password"
-                  type="password"
-                />
-                <button
-                  type="submit"
-                  className="h-10 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
-                  disabled={!activeVault || isBusy}
-                >
-                  Export vault
-                </button>
-              </form>
-
-              <form
-                className="grid gap-2 rounded-lg border border-[#25313c] bg-[#151b22] p-4"
-                onSubmit={handleImportVault}
-              >
-                <h2 className="text-sm font-semibold">Encrypted import</h2>
-                <input
-                  className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                  value={importPath}
-                  onChange={(event) => setImportPath(event.currentTarget.value)}
-                  placeholder="C:\\Users\\User\\Desktop\\termini-vault.json"
-                />
-                <input
-                  className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                  value={importPassword}
-                  onChange={(event) => setImportPassword(event.currentTarget.value)}
-                  placeholder="Export password"
-                  type="password"
-                />
-                <button
-                  type="submit"
-                  className="h-10 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
-                  disabled={isBusy}
-                >
-                  Import vault
-                </button>
-              </form>
-            </section>
-          </div>
+          </aside>
         </section>
 
-        <footer className="flex min-w-0 items-center gap-[18px] overflow-hidden border-t border-[#25313c] bg-[#151b22] px-2.5 text-xs whitespace-nowrap text-[#8fa1b2] max-[820px]:gap-2.5">
+        <footer className="flex min-w-0 items-center gap-[18px] overflow-hidden border-t border-[#25313c] bg-[#151b22] px-2.5 text-xs whitespace-nowrap text-[#8fa1b2]">
           <span>{isBusy ? "Working..." : status}</span>
           <span>{profiles.length} profiles</span>
           <span>{credentials.length} credentials</span>
           <span>Alt+Shift+D split</span>
+          <span>Alt+Shift++ vertical</span>
+          <span>Alt+Shift+- horizontal</span>
         </footer>
       </section>
     </main>

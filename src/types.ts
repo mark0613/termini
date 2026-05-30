@@ -32,3 +32,20 @@ export interface ImportVaultResult {
   credentialsImported: number;
   profilesImported: number;
 }
+
+export interface SshSessionInfo {
+  sessionId: string;
+  profileId: string;
+  credentialId: string;
+}
+
+export interface SshOutputEvent {
+  sessionId: string;
+  data: string;
+}
+
+export interface SshStatusEvent {
+  sessionId: string;
+  status: string;
+  message: string | null;
+}
