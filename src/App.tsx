@@ -128,8 +128,11 @@ function App() {
       return;
     }
 
-    if (!profiles.some((profile) => profile.id === selectedProfileId)) {
-      setSelectedProfileId(profiles[0].id);
+    if (
+      selectedProfileId &&
+      !profiles.some((profile) => profile.id === selectedProfileId)
+    ) {
+      setSelectedProfileId("");
     }
   }, [profiles, selectedProfileId]);
 
@@ -542,6 +545,7 @@ function App() {
             onNew={openNewProfileDrawer}
             onSearchChange={setHostSearch}
             onSelect={setSelectedProfileId}
+            onClearSelection={() => setSelectedProfileId("")}
           />
         </section>
       ) : null}

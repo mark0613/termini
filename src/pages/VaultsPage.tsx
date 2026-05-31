@@ -15,6 +15,7 @@ export function VaultsPage({
   onNew,
   onSearchChange,
   onSelect,
+  onClearSelection,
 }: {
   credentials: Credential[];
   error: string;
@@ -28,6 +29,7 @@ export function VaultsPage({
   onNew: () => void;
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
+  onClearSelection: () => void;
 }) {
   return (
     <section className="grid min-h-0 grid-rows-[64px_minmax(0,1fr)] border-l border-[#2b3044]">
@@ -48,7 +50,19 @@ export function VaultsPage({
         </div>
       </div>
 
-      <div className="min-h-0 overflow-auto bg-[#1d2133] p-8">
+      <div
+        className="min-h-0 overflow-auto bg-[#1d2133] p-8"
+        onMouseDown={(event) => {
+          const target = event.target;
+          if (
+            target instanceof HTMLElement &&
+            target.closest("[data-preserve-host-selection]")
+          ) {
+            return;
+          }
+          onClearSelection();
+        }}
+      >
         {error ? <ErrorBanner message={error} /> : null}
         <HostsGrid
           credentials={credentials}
@@ -104,6 +118,7 @@ function HostsGrid({
         <h2 className="text-sm font-bold text-white">Hosts</h2>
         <button
           type="button"
+          data-preserve-host-selection
           className="flex h-9 items-center gap-2 rounded-md border border-[#3a4058] bg-[#33384f] px-3 text-sm font-semibold hover:bg-[#3d435c]"
           onClick={onNew}
         >
@@ -120,6 +135,7 @@ function HostsGrid({
           return (
             <article
               key={profile.id}
+              data-preserve-host-selection
               className={`group grid min-h-[60px] grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border p-2.5 ${
                 selected
                   ? "border-[#1594ff] bg-[#282d43] shadow-[0_0_0_1px_#1594ff]"
