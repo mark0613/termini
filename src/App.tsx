@@ -78,7 +78,6 @@ function App() {
   const [activeTabId, setActiveTabId] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState("");
-  const [status, setStatus] = useState("Ready");
   const connectingPaneIdsRef = useRef(new Set<string>());
 
   const activeVault = useMemo(
@@ -270,7 +269,6 @@ function App() {
     setTabs((current) => [...current, tab]);
     setActiveTabId(tab.id);
     setActivePage("session");
-    setStatus(`Opening ${profile.name}`);
   }
 
   async function handlePaneReady(paneId: string, cols: number, rows: number) {
@@ -467,11 +465,9 @@ function App() {
       if (editingProfileId) {
         const profile = await api.updateProfile({ id: editingProfileId, ...payload });
         setSelectedProfileId(profile.id);
-        setStatus(`Host updated: ${profileForm.name}`);
       } else {
         const profile = await api.createProfile({ vaultId: activeVault.id, ...payload });
         setSelectedProfileId(profile.id);
-        setStatus(`Host created: ${profileForm.name}`);
       }
 
       setProfileForm(emptyProfileForm);
@@ -496,7 +492,6 @@ function App() {
 
     await runAction(async () => {
       await api.deleteProfile(id);
-      setStatus("Host deleted");
       setProfileDrawerOpen(false);
       setSelectedProfileId("");
       await refreshVaultData(activeVault.id);
@@ -568,7 +563,6 @@ function App() {
         password,
       });
       setExportPassword("");
-      setStatus(`Vault exported: ${path}`);
     } catch (err) {
       setExportError(getErrorMessage(err));
     } finally {
@@ -597,9 +591,6 @@ function App() {
         password,
       });
       setImportPassword("");
-      setStatus(
-        `Imported ${result.credentialsImported} identities and ${result.profilesImported} hosts`,
-      );
       await refreshVaults(result.vault.id);
       await refreshTerminalThemes();
     } catch (err) {
@@ -646,7 +637,6 @@ function App() {
       ]);
       setActiveTerminalThemeId(config.id);
       setThemeEditorOpen(false);
-      setStatus(`Theme created: ${config.name}`);
     } catch (err) {
       throw new Error(getErrorMessage(err));
     } finally {
@@ -671,7 +661,6 @@ function App() {
       if (activeTerminalThemeId === theme.id) {
         setActiveTerminalThemeId(DEFAULT_TERMINAL_THEME_ID);
       }
-      setStatus(`Theme deleted: ${theme.name}`);
     } catch (err) {
       setTerminalThemeError(getErrorMessage(err));
     } finally {
@@ -680,7 +669,7 @@ function App() {
   }
 
   return (
-    <main className="grid h-dvh w-full grid-rows-[50px_minmax(0,1fr)_28px] overflow-hidden bg-[#191d2d] text-[#f4f6fb]">
+    <main className="grid h-dvh w-full grid-rows-[50px_minmax(0,1fr)] overflow-hidden bg-[#191d2d] text-[#f4f6fb]">
       <AppHeader
         activePage={activePage}
         activeTabId={activeTabId}
@@ -785,13 +774,6 @@ function App() {
         }
         onPaneReady={handlePaneReady}
       />
-
-      <footer className="flex min-w-0 items-center justify-between border-t border-[#2b3044] bg-[#15192a] px-3 text-xs text-[#8d93ad]">
-        <span className="truncate">{isBusy ? "Working..." : status}</span>
-        <span className="truncate">
-          {profiles.length} hosts · {tabs.length} sessions
-        </span>
-      </footer>
 
       {profileDrawerOpen ? (
         <ProfileDrawer
