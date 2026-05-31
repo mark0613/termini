@@ -568,23 +568,23 @@ function App() {
         />
       ) : null}
 
-      {activePage === "session" ? (
-        <SessionPage
-          activeTab={activeTab}
-          activeVault={activeVault}
-          profiles={profiles}
-          onClosePane={closePane}
-          onConnect={connectProfile}
-          onFocusPane={(paneId) =>
-            setTabs((current) =>
-              current.map((tab) =>
-                tab.id === activeTabId ? { ...tab, activePaneId: paneId } : tab,
-              ),
-            )
-          }
-          onPaneReady={handlePaneReady}
-        />
-      ) : null}
+      <SessionPage
+        activeTabId={activeTabId}
+        activeVault={activeVault}
+        profiles={profiles}
+        tabs={tabs}
+        visible={activePage === "session"}
+        onClosePane={closePane}
+        onConnect={connectProfile}
+        onFocusPane={(tabId, paneId) =>
+          setTabs((current) =>
+            current.map((tab) =>
+              tab.id === tabId ? { ...tab, activePaneId: paneId } : tab,
+            ),
+          )
+        }
+        onPaneReady={handlePaneReady}
+      />
 
       <footer className="flex min-w-0 items-center justify-between border-t border-[#2b3044] bg-[#15192a] px-3 text-xs text-[#8d93ad]">
         <span className="truncate">{isBusy ? "Working..." : status}</span>

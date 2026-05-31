@@ -4,43 +4,70 @@ import { collectPanes, type TerminalTab } from "../terminalTree";
 import type { SshProfile, Vault } from "../types";
 
 export function SessionPage({
-  activeTab,
+  activeTabId,
   activeVault,
   profiles,
+  tabs,
+  visible,
   onClosePane,
   onConnect,
   onFocusPane,
   onPaneReady,
 }: {
-  activeTab: TerminalTab | null;
+  activeTabId: string;
   activeVault: Vault | null;
   profiles: SshProfile[];
+  tabs: TerminalTab[];
+  visible: boolean;
   onClosePane: (paneId: string) => void;
   onConnect: (profile: SshProfile) => void;
-  onFocusPane: (paneId: string) => void;
+  onFocusPane: (tabId: string, paneId: string) => void;
   onPaneReady: (paneId: string, cols: number, rows: number) => void;
 }) {
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const emptyTab = activeTab
     ? collectPanes(activeTab.root).every((pane) => !pane.profileId)
     : true;
 
   return (
-    <section className="grid min-h-0 grid-rows-[minmax(0,1fr)] bg-[#111522]">
-      <div className="min-h-0 bg-[#0d1116] p-3">
+    <section
+      className={`min-h-0 grid-rows-[minmax(0,1fr)] bg-[#111522] ${
+        visible ? "grid" : "hidden"
+      }`}
+    >
+      <div className="relative min-h-0 bg-[#0d1116]">
         {activeTab && !emptyTab ? (
-          <SplitWorkspace
-            activePaneId={activeTab.activePaneId}
-            node={activeTab.root}
-            onClosePane={onClosePane}
-            onFocusPane={onFocusPane}
-            onPaneReady={onPaneReady}
-          />
+          tabs.map((tab) => {
+            const isActive = tab.id === activeTabId;
+            const tabEmpty = collectPanes(tab.root).every((pane) => !pane.profileId);
+            if (tabEmpty) return null;
+
+            return (
+              <div
+                key={tab.id}
+                className={`absolute inset-3 min-h-0 min-w-0 ${
+                  isActive ? "visible" : "invisible pointer-events-none"
+                }`}
+                aria-hidden={!isActive}
+              >
+                <SplitWorkspace
+                  activePaneId={tab.activePaneId}
+                  node={tab.root}
+                  onClosePane={onClosePane}
+                  onFocusPane={(paneId) => onFocusPane(tab.id, paneId)}
+                  onPaneReady={onPaneReady}
+                />
+              </div>
+            );
+          })
         ) : (
-          <SessionEmptyState
-            activeVault={activeVault}
-            profiles={profiles}
-            onConnect={onConnect}
-          />
+          <div className="h-full p-3">
+            <SessionEmptyState
+              activeVault={activeVault}
+              profiles={profiles}
+              onConnect={onConnect}
+            />
+          </div>
         )}
       </div>
     </section>
