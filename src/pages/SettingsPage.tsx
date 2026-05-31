@@ -1,4 +1,4 @@
-import { Download, Upload } from "lucide-react";
+import { Download, Plus, Trash2, Upload } from "lucide-react";
 import type { FormEvent } from "react";
 import type { SettingsSection } from "../appTypes";
 import {
@@ -11,6 +11,7 @@ import {
   ReadOnlyValue,
   ShortcutRow,
 } from "../components/ui";
+import type { TerminalThemeConfig } from "../terminalThemes";
 import type { Vault } from "../types";
 
 const databaseLocation = "%APPDATA%\\Termini\\termini.sqlite3";
@@ -18,6 +19,7 @@ const databaseLocation = "%APPDATA%\\Termini\\termini.sqlite3";
 export function SettingsPage({
   activeSection,
   activeVault,
+  activeTerminalThemeId,
   exportError,
   exportPassword,
   exportPath,
@@ -25,8 +27,13 @@ export function SettingsPage({
   importPassword,
   importPath,
   isBusy,
+  terminalThemeError,
+  terminalThemes,
+  onActiveTerminalThemeChange,
   onChooseExportPath,
   onChooseImportPath,
+  onCreateTheme,
+  onDeleteTheme,
   onExport,
   onExportPasswordChange,
   onExportPathChange,
@@ -36,6 +43,7 @@ export function SettingsPage({
 }: {
   activeSection: SettingsSection;
   activeVault: Vault | null;
+  activeTerminalThemeId: string;
   exportError: string;
   exportPassword: string;
   exportPath: string;
@@ -43,8 +51,13 @@ export function SettingsPage({
   importPassword: string;
   importPath: string;
   isBusy: boolean;
+  terminalThemeError: string;
+  terminalThemes: TerminalThemeConfig[];
+  onActiveTerminalThemeChange: (id: string) => void;
   onChooseExportPath: () => void;
   onChooseImportPath: () => void;
+  onCreateTheme: () => void;
+  onDeleteTheme: (theme: TerminalThemeConfig) => void;
   onExport: (event: FormEvent) => void;
   onExportPasswordChange: (value: string) => void;
   onExportPathChange: (value: string) => void;
@@ -115,9 +128,77 @@ export function SettingsPage({
             <ShortcutRow keys="Alt+Shift+-" label="Horizontal split" />
           </Panel>
         ) : activeSection === "preferences" ? (
-          <Panel title="Terminal">
-            <ReadOnlyValue value="Cascadia Mono, 13px" />
-          </Panel>
+          <>
+            <Panel title="Terminal">
+              <ReadOnlyValue value="Cascadia Mono, 13px" />
+            </Panel>
+
+            <Panel title="Theme">
+              {terminalThemeError ? (
+                <ErrorBanner message={terminalThemeError} />
+              ) : null}
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <Label>Active theme</Label>
+                  <ActionButton type="button" onClick={onCreateTheme} disabled={isBusy}>
+                    <Plus size={16} />
+                    <span>Create theme</span>
+                  </ActionButton>
+                </div>
+
+                <div className="grid gap-2">
+                  {terminalThemes.map((theme) => {
+                    const active = theme.id === activeTerminalThemeId;
+                    return (
+                      <div
+                        key={theme.id}
+                        role="button"
+                        tabIndex={0}
+                        className={`grid min-h-12 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border px-3 py-2 text-left ${
+                          active
+                            ? "border-[#1e9bff] bg-[#24364d]"
+                            : "border-[#343a52] bg-[#1c2134] hover:border-[#4a526d] hover:bg-[#23283d]"
+                        }`}
+                        onClick={() => {
+                          if (isBusy) return;
+                          if (!active) onActiveTerminalThemeChange(theme.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          if (isBusy) return;
+                          if (!active) onActiveTerminalThemeChange(theme.id);
+                        }}
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-white">
+                            {theme.name}
+                          </div>
+                        </div>
+                        {!theme.readOnly ? (
+                          <button
+                            type="button"
+                            className="grid size-8 place-items-center rounded-md text-[#ffb8c0] hover:bg-[#2a171b] disabled:opacity-50"
+                            disabled={isBusy}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDeleteTheme(theme);
+                            }}
+                            aria-label={`Delete ${theme.name}`}
+                            title={`Delete ${theme.name}`}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        ) : (
+                          <span className="size-8" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </Panel>
+          </>
         ) : (
           <Panel title="About">
             <ReadOnlyValue value="Termini 0.1.0" />

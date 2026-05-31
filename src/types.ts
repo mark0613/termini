@@ -33,6 +33,14 @@ export interface ImportVaultResult {
   profilesImported: number;
 }
 
+export interface TerminalTheme {
+  id: string;
+  name: string;
+  colorsJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SshSessionInfo {
   sessionId: string;
   profileId: string;

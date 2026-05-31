@@ -1,11 +1,14 @@
 import { Search, Terminal } from "lucide-react";
 import { SplitWorkspace } from "../components/SplitWorkspace";
+import type { TerminalThemeConfig } from "../terminalThemes";
 import { collectPanes, type TerminalTab } from "../terminalTree";
 import type { SshProfile, Vault } from "../types";
 
 export function SessionPage({
   activeTabId,
   activeVault,
+  activeTheme,
+  themeReady,
   profiles,
   tabs,
   visible,
@@ -16,6 +19,8 @@ export function SessionPage({
 }: {
   activeTabId: string;
   activeVault: Vault | null;
+  activeTheme: TerminalThemeConfig;
+  themeReady: boolean;
   profiles: SshProfile[];
   tabs: TerminalTab[];
   visible: boolean;
@@ -36,7 +41,7 @@ export function SessionPage({
       }`}
     >
       <div className="relative min-h-0 bg-[#0d1116]">
-        {activeTab && !emptyTab ? (
+        {themeReady && activeTab && !emptyTab ? (
           tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
             const tabEmpty = collectPanes(tab.root).every((pane) => !pane.profileId);
@@ -52,6 +57,7 @@ export function SessionPage({
               >
                 <SplitWorkspace
                   activePaneId={tab.activePaneId}
+                  activeTheme={activeTheme}
                   node={tab.root}
                   onClosePane={onClosePane}
                   onFocusPane={(paneId) => onFocusPane(tab.id, paneId)}

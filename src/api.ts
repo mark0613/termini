@@ -4,6 +4,7 @@ import type {
   ImportVaultResult,
   SshSessionInfo,
   SshProfile,
+  TerminalTheme,
   Vault,
 } from "./types";
 
@@ -89,6 +90,29 @@ export function exportVault(input: {
 
 export function importVault(input: { path: string; password: string }) {
   return invoke<ImportVaultResult>("import_vault", { input });
+}
+
+export function listTerminalThemes() {
+  return invoke<TerminalTheme[]>("list_terminal_themes");
+}
+
+export function createTerminalTheme(input: {
+  name: string;
+  colorsJson: string;
+}) {
+  return invoke<TerminalTheme>("create_terminal_theme", { input });
+}
+
+export function activeTerminalThemeId() {
+  return invoke<string | null>("active_terminal_theme_id");
+}
+
+export function setActiveTerminalThemeId(id: string) {
+  return invoke<void>("set_active_terminal_theme_id", { input: { id } });
+}
+
+export function deleteTerminalTheme(id: string) {
+  return invoke<void>("delete_terminal_theme", { id });
 }
 
 export function connectSsh(input: {

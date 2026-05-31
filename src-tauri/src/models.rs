@@ -35,6 +35,16 @@ pub struct SshProfile {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalTheme {
+    pub id: String,
+    pub name: String,
+    pub colors_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVaultInput {
@@ -101,6 +111,19 @@ pub struct ExportVaultInput {
 pub struct ImportVaultInput {
     pub path: String,
     pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTerminalThemeInput {
+    pub name: String,
+    pub colors_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetActiveTerminalThemeInput {
+    pub id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -183,6 +206,10 @@ pub struct ExportPayload {
     pub vault: ExportVault,
     pub credentials: Vec<ExportCredential>,
     pub profiles: Vec<ExportProfile>,
+    #[serde(default)]
+    pub terminal_themes: Vec<ExportTerminalTheme>,
+    #[serde(default)]
+    pub active_terminal_theme_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -210,4 +237,12 @@ pub struct ExportProfile {
     pub host: String,
     pub port: u16,
     pub username: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportTerminalTheme {
+    pub id: String,
+    pub name: String,
+    pub colors_json: String,
 }

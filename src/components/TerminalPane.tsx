@@ -8,14 +8,20 @@ import {
   Terminal as TerminalIcon,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
+import {
+  DEFAULT_TERMINAL_THEME,
+  toXtermTheme,
+  type TerminalThemeConfig,
+} from "../terminalThemes";
 import type { SshOutputEvent } from "../types";
 import type { TerminalPaneState } from "../terminalTree";
 
 interface TerminalPaneProps {
   pane: TerminalPaneState;
   active: boolean;
+  terminalTheme?: TerminalThemeConfig;
   onFocus: () => void;
   onReady: (cols: number, rows: number) => void;
   onClose: () => void;
@@ -24,6 +30,7 @@ interface TerminalPaneProps {
 export function TerminalPane({
   pane,
   active,
+  terminalTheme,
   onFocus,
   onReady,
   onClose,
@@ -43,6 +50,9 @@ export function TerminalPane({
     pane.status === "pending" || pane.status === "connecting",
   );
   const [overlayStep, setOverlayStep] = useState(0);
+  const effectiveTheme = terminalTheme ?? DEFAULT_TERMINAL_THEME;
+  const xtermTheme = useMemo(() => toXtermTheme(effectiveTheme), [effectiveTheme]);
+  const terminalBackground = effectiveTheme.colors.background;
   const connecting = pane.status === "pending" || pane.status === "connecting";
   const showConnectionOverlay = connecting || overlayVisible;
 
@@ -99,15 +109,13 @@ export function TerminalPane({
         "Cascadia Mono, JetBrains Mono, Consolas, ui-monospace, monospace",
       fontSize: 13,
       theme: {
-        background: "#0d1116",
-        foreground: "#d9e3ec",
-        cursor: "#55c2a2",
-        selectionBackground: "#2e6f5d",
+        ...xtermTheme,
       },
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(hostRef.current);
+    applyTerminalTheme(terminal, xtermTheme);
     fitAddon.fit();
 
     terminal.onData((data) => {
@@ -171,6 +179,14 @@ export function TerminalPane({
       fitAddonRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+
+    applyTerminalTheme(terminal, xtermTheme);
+    fitAddonRef.current?.fit();
+  }, [xtermTheme]);
 
   useEffect(() => {
     if (active) {
@@ -257,6 +273,7 @@ export function TerminalPane({
   return (
     <div
       className={paneFrameClass}
+      style={{ background: terminalBackground }}
       onMouseDown={onFocus}
     >
       {!showConnectionOverlay ? (
@@ -276,6 +293,7 @@ export function TerminalPane({
       ) : null}
       <div
         ref={hostRef}
+        style={{ background: terminalBackground }}
         className={
           showConnectionOverlay
             ? "invisible absolute inset-0 min-h-0 min-w-0 p-2"
@@ -391,4 +409,27 @@ function hasPasswordPrompt(value: string) {
 
 function stripAnsi(value: string) {
   return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function applyTerminalTheme(
+  terminal: Terminal,
+  theme: ReturnType<typeof toXtermTheme>,
+) {
+  const nextTheme = { ...theme };
+  terminal.options.theme = nextTheme;
+
+  const element = terminal.element;
+  if (element) {
+    element.style.backgroundColor = nextTheme.background ?? "";
+    element.style.color = nextTheme.foreground ?? "";
+
+    for (const item of element.querySelectorAll<HTMLElement>(
+      ".xterm-viewport, .xterm-screen, .xterm-rows",
+    )) {
+      item.style.backgroundColor = nextTheme.background ?? "";
+      item.style.color = nextTheme.foreground ?? "";
+    }
+  }
+
+  terminal.refresh(0, Math.max(0, terminal.rows - 1));
 }

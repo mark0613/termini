@@ -3,10 +3,11 @@ use tauri::State;
 use crate::{
     error::command_result,
     models::{
-        ConnectSshInput, CreateCredentialInput, CreateProfileInput, CreateVaultInput, Credential,
-        ExportVaultInput, ImportVaultInput, ImportVaultResult, SshProfile, SshResizeInput,
-        SshSessionInfo, SshSessionInput, SshWriteInput, UpdateCredentialInput, UpdateProfileInput,
-        UpdateVaultInput, Vault,
+        ConnectSshInput, CreateCredentialInput, CreateProfileInput, CreateTerminalThemeInput,
+        CreateVaultInput, Credential, ExportVaultInput, ImportVaultInput, ImportVaultResult,
+        SetActiveTerminalThemeInput, SshProfile, SshResizeInput, SshSessionInfo, SshSessionInput,
+        SshWriteInput, TerminalTheme, UpdateCredentialInput, UpdateProfileInput, UpdateVaultInput,
+        Vault,
     },
     state::AppState,
 };
@@ -128,6 +129,41 @@ pub fn import_vault(
     input: ImportVaultInput,
 ) -> Result<ImportVaultResult, String> {
     command_result(state.storage.import_vault(input.path, input.password))
+}
+
+#[tauri::command]
+pub fn list_terminal_themes(state: State<'_, AppState>) -> Result<Vec<TerminalTheme>, String> {
+    command_result(state.storage.list_terminal_themes())
+}
+
+#[tauri::command]
+pub fn create_terminal_theme(
+    state: State<'_, AppState>,
+    input: CreateTerminalThemeInput,
+) -> Result<TerminalTheme, String> {
+    command_result(
+        state
+            .storage
+            .create_terminal_theme(input.name, input.colors_json),
+    )
+}
+
+#[tauri::command]
+pub fn active_terminal_theme_id(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    command_result(state.storage.active_terminal_theme_id())
+}
+
+#[tauri::command]
+pub fn set_active_terminal_theme_id(
+    state: State<'_, AppState>,
+    input: SetActiveTerminalThemeInput,
+) -> Result<(), String> {
+    command_result(state.storage.set_active_terminal_theme_id(input.id))
+}
+
+#[tauri::command]
+pub fn delete_terminal_theme(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    command_result(state.storage.delete_terminal_theme(id))
 }
 
 #[tauri::command]

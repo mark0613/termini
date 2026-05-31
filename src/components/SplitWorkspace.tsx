@@ -1,10 +1,12 @@
 import type { CSSProperties } from "react";
+import type { TerminalThemeConfig } from "../terminalThemes";
 import type { SplitNodeState, TerminalPaneState, WorkspaceNode } from "../terminalTree";
 import { TerminalPane } from "./TerminalPane";
 
 interface SplitWorkspaceProps {
   node: WorkspaceNode;
   activePaneId: string;
+  activeTheme: TerminalThemeConfig;
   onFocusPane: (paneId: string) => void;
   onPaneReady: (paneId: string, cols: number, rows: number) => void;
   onClosePane: (paneId: string) => void;
@@ -13,6 +15,7 @@ interface SplitWorkspaceProps {
 export function SplitWorkspace({
   node,
   activePaneId,
+  activeTheme,
   onFocusPane,
   onPaneReady,
   onClosePane,
@@ -30,6 +33,7 @@ export function SplitWorkspace({
           <TerminalPane
             pane={pane}
             active={pane.id === activePaneId}
+            terminalTheme={activeTheme}
             onFocus={() => onFocusPane(pane.id)}
             onReady={(cols, rows) => onPaneReady(pane.id, cols, rows)}
             onClose={() => onClosePane(pane.id)}

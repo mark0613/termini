@@ -12,8 +12,17 @@ import {
 import { AppHeader } from "./components/AppHeader";
 import { AppSidebar } from "./components/AppSidebar";
 import { ProfileDrawer } from "./components/ProfileDrawer";
+import { ThemeEditorModal } from "./components/ThemeEditorModal";
 import { SessionPage } from "./pages/SessionPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import {
+  DEFAULT_TERMINAL_THEME,
+  DEFAULT_TERMINAL_THEME_ID,
+  storedThemeToConfig,
+  toStoredColorsJson,
+  type TerminalThemeConfig,
+  type TerminalThemeDraft,
+} from "./terminalThemes";
 import { VaultsPage } from "./pages/VaultsPage";
 import {
   collectPanes,
@@ -56,6 +65,15 @@ function App() {
   const [importPath, setImportPath] = useState("");
   const [importPassword, setImportPassword] = useState("");
   const [importError, setImportError] = useState("");
+  const [terminalThemes, setTerminalThemes] = useState<TerminalThemeConfig[]>([
+    DEFAULT_TERMINAL_THEME,
+  ]);
+  const [terminalThemesLoaded, setTerminalThemesLoaded] = useState(false);
+  const [activeTerminalThemeId, setActiveTerminalThemeId] = useState(
+    DEFAULT_TERMINAL_THEME.id,
+  );
+  const [terminalThemeError, setTerminalThemeError] = useState("");
+  const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -70,6 +88,12 @@ function App() {
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, tabs],
+  );
+  const activeTerminalTheme = useMemo(
+    () =>
+      terminalThemes.find((theme) => theme.id === activeTerminalThemeId) ??
+      DEFAULT_TERMINAL_THEME,
+    [activeTerminalThemeId, terminalThemes],
   );
   const filteredProfiles = useMemo(() => {
     const query = hostSearch.trim().toLowerCase();
@@ -86,9 +110,10 @@ function App() {
         .includes(query),
     );
   }, [hostSearch, profiles]);
+
   useEffect(() => {
     void runAction(async () => {
-      await refreshVaults();
+      await Promise.all([refreshVaults(), refreshTerminalThemes()]);
     });
   }, []);
 
@@ -208,6 +233,24 @@ function App() {
     ]);
     setCredentials(nextCredentials);
     setProfiles(nextProfiles);
+  }
+
+  async function refreshTerminalThemes() {
+    const [storedThemes, activeThemeId] = await Promise.all([
+      api.listTerminalThemes(),
+      api.activeTerminalThemeId(),
+    ]);
+    const customThemes = storedThemes
+      .map(storedThemeToConfig)
+      .filter((theme): theme is TerminalThemeConfig => Boolean(theme));
+    const nextThemes = [DEFAULT_TERMINAL_THEME, ...customThemes];
+    setTerminalThemes(nextThemes);
+    setActiveTerminalThemeId(
+      activeThemeId && nextThemes.some((theme) => theme.id === activeThemeId)
+        ? activeThemeId
+        : DEFAULT_TERMINAL_THEME.id,
+    );
+    setTerminalThemesLoaded(true);
   }
 
   function updatePaneInTabs(
@@ -558,8 +601,79 @@ function App() {
         `Imported ${result.credentialsImported} identities and ${result.profilesImported} hosts`,
       );
       await refreshVaults(result.vault.id);
+      await refreshTerminalThemes();
     } catch (err) {
       setImportError(getErrorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleActiveTerminalThemeChange(id: string) {
+    const previousId = activeTerminalThemeId;
+    setActiveTerminalThemeId(id);
+    setTerminalThemeError("");
+
+    try {
+      await api.setActiveTerminalThemeId(id);
+    } catch (err) {
+      setActiveTerminalThemeId(previousId);
+      setTerminalThemeError(getErrorMessage(err));
+    }
+  }
+
+  async function handleCreateTerminalTheme(theme: TerminalThemeDraft) {
+    setIsBusy(true);
+    setTerminalThemeError("");
+
+    try {
+      const createdTheme = await api.createTerminalTheme({
+        name: theme.name,
+        colorsJson: toStoredColorsJson(theme),
+      });
+      const config = storedThemeToConfig(createdTheme);
+      if (!config) {
+        throw new Error("Created theme could not be loaded.");
+      }
+
+      await api.setActiveTerminalThemeId(config.id);
+      setTerminalThemes((current) => [
+        DEFAULT_TERMINAL_THEME,
+        ...current
+          .filter((item) => !item.readOnly && item.id !== config.id)
+          .concat(config)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      ]);
+      setActiveTerminalThemeId(config.id);
+      setThemeEditorOpen(false);
+      setStatus(`Theme created: ${config.name}`);
+    } catch (err) {
+      throw new Error(getErrorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleDeleteTerminalTheme(theme: TerminalThemeConfig) {
+    if (theme.readOnly) return;
+
+    const confirmed = await confirmDelete(
+      `Delete theme "${theme.name}"?`,
+      "Delete theme",
+    );
+    if (!confirmed) return;
+
+    setIsBusy(true);
+    setTerminalThemeError("");
+    try {
+      await api.deleteTerminalTheme(theme.id);
+      setTerminalThemes((current) => current.filter((item) => item.id !== theme.id));
+      if (activeTerminalThemeId === theme.id) {
+        setActiveTerminalThemeId(DEFAULT_TERMINAL_THEME_ID);
+      }
+      setStatus(`Theme deleted: ${theme.name}`);
+    } catch (err) {
+      setTerminalThemeError(getErrorMessage(err));
     } finally {
       setIsBusy(false);
     }
@@ -610,6 +724,7 @@ function App() {
             <SettingsPage
               activeSection={activeSettingsSection}
               activeVault={activeVault}
+              activeTerminalThemeId={activeTerminalThemeId}
               exportError={exportError}
               exportPassword={exportPassword}
               exportPath={exportPath}
@@ -617,8 +732,17 @@ function App() {
               importPassword={importPassword}
               importPath={importPath}
               isBusy={isBusy}
+              terminalThemeError={terminalThemeError}
+              terminalThemes={terminalThemes}
+              onActiveTerminalThemeChange={(id) => {
+                void handleActiveTerminalThemeChange(id);
+              }}
               onChooseExportPath={chooseExportPath}
               onChooseImportPath={chooseImportPath}
+              onCreateTheme={() => setThemeEditorOpen(true)}
+              onDeleteTheme={(theme) => {
+                void handleDeleteTerminalTheme(theme);
+              }}
               onExport={handleExportVault}
               onExportPasswordChange={(value) => {
                 setExportPassword(value);
@@ -645,6 +769,8 @@ function App() {
       <SessionPage
         activeTabId={activeTabId}
         activeVault={activeVault}
+        activeTheme={activeTerminalTheme}
+        themeReady={terminalThemesLoaded}
         profiles={profiles}
         tabs={tabs}
         visible={activePage === "session"}
@@ -677,6 +803,18 @@ function App() {
           onClose={() => setProfileDrawerOpen(false)}
           onDelete={() => editingProfileId && handleDeleteProfile(editingProfileId)}
           onSubmit={handleSaveProfile}
+        />
+      ) : null}
+
+      {themeEditorOpen ? (
+        <ThemeEditorModal
+          initialTheme={{
+            name: `${activeTerminalTheme.name} Copy`,
+            colors: activeTerminalTheme.colors,
+          }}
+          isBusy={isBusy}
+          onClose={() => setThemeEditorOpen(false)}
+          onSave={handleCreateTerminalTheme}
         />
       ) : null}
     </main>

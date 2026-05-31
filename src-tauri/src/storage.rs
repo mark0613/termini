@@ -13,11 +13,14 @@ use crate::{
     crypto::{decrypt_export_payload, encrypt_export_payload},
     error::{AppError, AppResult},
     models::{
-        Credential, ExportCredential, ExportFile, ExportPayload, ExportProfile, ExportVault,
-        ImportVaultResult, SshProfile, Vault,
+        Credential, ExportCredential, ExportFile, ExportPayload, ExportProfile,
+        ExportTerminalTheme, ExportVault, ImportVaultResult, SshProfile, TerminalTheme, Vault,
     },
     secrets,
 };
+
+const DEFAULT_TERMINAL_THEME_ID: &str = "termini-default";
+const ACTIVE_TERMINAL_THEME_KEY: &str = "active_terminal_theme_id";
 
 pub struct Storage {
     conn: Mutex<Connection>,
@@ -270,12 +273,81 @@ impl Storage {
         self.get_profile_locked(&conn, id)
     }
 
+    pub fn list_terminal_themes(&self) -> AppResult<Vec<TerminalTheme>> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        self.list_terminal_themes_locked(&conn)
+    }
+
+    pub fn create_terminal_theme(
+        &self,
+        name: String,
+        colors_json: String,
+    ) -> AppResult<TerminalTheme> {
+        let name = clean_required(name, "theme name")?;
+        let colors_json = clean_json_object(colors_json, "theme colors")?;
+        let id = Uuid::new_v4().to_string();
+        let now = now();
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+
+        conn.execute(
+            "INSERT INTO terminal_themes (id, name, colors_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, colors_json, now, now],
+        )?;
+
+        self.get_terminal_theme_locked(&conn, &id)
+    }
+
+    pub fn active_terminal_theme_id(&self) -> AppResult<Option<String>> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        self.get_setting_locked(&conn, ACTIVE_TERMINAL_THEME_KEY)
+    }
+
+    pub fn set_active_terminal_theme_id(&self, id: String) -> AppResult<()> {
+        let id = clean_required(id, "theme id")?;
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        if id != DEFAULT_TERMINAL_THEME_ID {
+            self.ensure_terminal_theme_exists_locked(&conn, &id)?;
+        }
+
+        self.set_setting_locked(&conn, ACTIVE_TERMINAL_THEME_KEY, &id)
+    }
+
+    pub fn delete_terminal_theme(&self, id: String) -> AppResult<()> {
+        let id = clean_required(id, "theme id")?;
+        if id == DEFAULT_TERMINAL_THEME_ID {
+            return Err(AppError::InvalidInput(
+                "default terminal theme cannot be deleted".to_string(),
+            ));
+        }
+
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        self.ensure_terminal_theme_exists_locked(&conn, &id)?;
+        conn.execute("DELETE FROM terminal_themes WHERE id = ?1", params![id])?;
+
+        if self
+            .get_setting_locked(&conn, ACTIVE_TERMINAL_THEME_KEY)?
+            .as_deref()
+            == Some(id.as_str())
+        {
+            self.set_setting_locked(
+                &conn,
+                ACTIVE_TERMINAL_THEME_KEY,
+                DEFAULT_TERMINAL_THEME_ID,
+            )?;
+        }
+
+        Ok(())
+    }
+
     pub fn export_vault(&self, vault_id: String, path: String, password: String) -> AppResult<()> {
         let password = clean_required(password, "export password")?;
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let vault = self.get_vault_locked(&conn, &vault_id)?;
         let credentials = self.list_credentials_locked(&conn, &vault_id)?;
         let profiles = self.list_profiles_locked(&conn, &vault_id)?;
+        let terminal_themes = self.list_terminal_themes_locked(&conn)?;
+        let active_terminal_theme_id = self.get_setting_locked(&conn, ACTIVE_TERMINAL_THEME_KEY)?;
         drop(conn);
 
         let export_credentials = credentials
@@ -315,6 +387,15 @@ impl Storage {
                     username: profile.username,
                 })
                 .collect(),
+            terminal_themes: terminal_themes
+                .into_iter()
+                .map(|theme| ExportTerminalTheme {
+                    id: theme.id,
+                    name: theme.name,
+                    colors_json: theme.colors_json,
+                })
+                .collect(),
+            active_terminal_theme_id,
         };
         let export_file = encrypt_export_payload(&payload, &password)?;
         fs::write(path, serde_json::to_vec_pretty(&export_file)?)?;
@@ -330,6 +411,7 @@ impl Storage {
         let vault_name = unique_import_name(&payload.vault.name);
         let now = now();
         let mut credential_id_map = HashMap::new();
+        let mut theme_id_map = HashMap::new();
 
         let conn = self.conn.lock().expect("storage mutex poisoned");
         conn.execute(
@@ -386,6 +468,29 @@ impl Storage {
             )?;
         }
 
+        for theme in &payload.terminal_themes {
+            let new_id = Uuid::new_v4().to_string();
+            let colors_json = clean_json_object(theme.colors_json.clone(), "theme colors")?;
+            theme_id_map.insert(theme.id.clone(), new_id.clone());
+            conn.execute(
+                "INSERT INTO terminal_themes (id, name, colors_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![new_id, theme.name, colors_json, now, now],
+            )?;
+        }
+
+        if let Some(active_theme_id) = payload.active_terminal_theme_id {
+            if active_theme_id == DEFAULT_TERMINAL_THEME_ID {
+                self.set_setting_locked(
+                    &conn,
+                    ACTIVE_TERMINAL_THEME_KEY,
+                    DEFAULT_TERMINAL_THEME_ID,
+                )?;
+            } else if let Some(new_id) = theme_id_map.get(&active_theme_id) {
+                self.set_setting_locked(&conn, ACTIVE_TERMINAL_THEME_KEY, new_id)?;
+            }
+        }
+
         Ok(ImportVaultResult {
             vault: self.get_vault_locked(&conn, &vault_id)?,
             credentials_imported: payload.credentials.len(),
@@ -429,6 +534,19 @@ impl Storage {
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE,
                 FOREIGN KEY (credential_id) REFERENCES credentials(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS terminal_themes (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                colors_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );
             ",
         )?;
@@ -547,6 +665,62 @@ impl Storage {
         let rows = stmt.query_map(params![vault_id], map_profile)?;
         collect_rows(rows)
     }
+
+    fn list_terminal_themes_locked(&self, conn: &Connection) -> AppResult<Vec<TerminalTheme>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, colors_json, created_at, updated_at
+             FROM terminal_themes
+             ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], map_terminal_theme)?;
+        collect_rows(rows)
+    }
+
+    fn get_terminal_theme_locked(&self, conn: &Connection, id: &str) -> AppResult<TerminalTheme> {
+        conn.query_row(
+            "SELECT id, name, colors_json, created_at, updated_at
+             FROM terminal_themes
+             WHERE id = ?1",
+            params![id],
+            map_terminal_theme,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::InvalidInput("terminal theme not found".to_string()))
+    }
+
+    fn ensure_terminal_theme_exists_locked(&self, conn: &Connection, id: &str) -> AppResult<()> {
+        let exists: Option<String> = conn
+            .query_row(
+                "SELECT id FROM terminal_themes WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        exists
+            .map(|_| ())
+            .ok_or_else(|| AppError::InvalidInput("terminal theme not found".to_string()))
+    }
+
+    fn get_setting_locked(&self, conn: &Connection, key: &str) -> AppResult<Option<String>> {
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(AppError::from)
+    }
+
+    fn set_setting_locked(&self, conn: &Connection, key: &str, value: &str) -> AppResult<()> {
+        conn.execute(
+            "INSERT INTO app_settings (key, value)
+             VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }
 
 fn map_vault(row: &Row<'_>) -> rusqlite::Result<Vault> {
@@ -586,6 +760,16 @@ fn map_profile(row: &Row<'_>) -> rusqlite::Result<SshProfile> {
     })
 }
 
+fn map_terminal_theme(row: &Row<'_>) -> rusqlite::Result<TerminalTheme> {
+    Ok(TerminalTheme {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        colors_json: row.get(2)?,
+        created_at: row.get(3)?,
+        updated_at: row.get(4)?,
+    })
+}
+
 fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> AppResult<Vec<T>> {
     let mut items = Vec::new();
     for row in rows {
@@ -598,6 +782,15 @@ fn clean_required(value: String, field_name: &str) -> AppResult<String> {
     let value = value.trim().to_string();
     if value.is_empty() {
         return Err(AppError::InvalidInput(format!("{field_name} is required")));
+    }
+    Ok(value)
+}
+
+fn clean_json_object(value: String, field_name: &str) -> AppResult<String> {
+    let value = clean_required(value, field_name)?;
+    let json: serde_json::Value = serde_json::from_str(&value)?;
+    if !json.is_object() {
+        return Err(AppError::InvalidInput(format!("{field_name} must be a JSON object")));
     }
     Ok(value)
 }
