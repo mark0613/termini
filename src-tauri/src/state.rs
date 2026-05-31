@@ -8,9 +8,9 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(app_data_dir: PathBuf) -> AppResult<Self> {
+    pub fn new(app_data_dir: PathBuf, legacy_app_data_dir: Option<PathBuf>) -> AppResult<Self> {
         Ok(Self {
-            storage: Storage::new(app_data_dir)?,
+            storage: Storage::new(app_data_dir, legacy_app_data_dir)?,
             ssh: SshManager::default(),
         })
     }

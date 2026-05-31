@@ -15,8 +15,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let app_data_dir = app.path().app_data_dir()?;
-            let state = AppState::new(app_data_dir)?;
+            let path = app.path();
+            let legacy_app_data_dir = path.app_data_dir()?;
+            let app_data_dir = path.data_dir()?.join("Termini");
+            let state = AppState::new(app_data_dir, Some(legacy_app_data_dir))?;
             app.manage(state);
             Ok(())
         })

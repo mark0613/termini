@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -19,9 +24,11 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new(app_data_dir: PathBuf) -> AppResult<Self> {
+    pub fn new(app_data_dir: PathBuf, legacy_app_data_dir: Option<PathBuf>) -> AppResult<Self> {
         fs::create_dir_all(&app_data_dir)?;
-        let conn = Connection::open(app_data_dir.join("termini.sqlite3"))?;
+        let db_path = app_data_dir.join("termini.sqlite3");
+        migrate_database_path(&db_path, legacy_app_data_dir.as_deref())?;
+        let conn = Connection::open(db_path)?;
         let storage = Self {
             conn: Mutex::new(conn),
         };
@@ -600,4 +607,23 @@ fn now() -> String {
 
 fn unique_import_name(name: &str) -> String {
     format!("{name} (Imported)")
+}
+
+fn migrate_database_path(db_path: &Path, legacy_app_data_dir: Option<&Path>) -> AppResult<()> {
+    if db_path.exists() {
+        return Ok(());
+    }
+
+    let Some(legacy_app_data_dir) = legacy_app_data_dir else {
+        return Ok(());
+    };
+    let legacy_db_path = legacy_app_data_dir.join("termini.sqlite3");
+    if !legacy_db_path.exists() || legacy_db_path == db_path {
+        return Ok(());
+    }
+
+    if fs::rename(&legacy_db_path, db_path).is_err() {
+        fs::copy(&legacy_db_path, db_path)?;
+    }
+    Ok(())
 }
