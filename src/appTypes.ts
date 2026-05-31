@@ -1,8 +1,7 @@
 import type { SshProfile } from "./types";
 
 export type AppPage = "vaults" | "session" | "settings";
-export type VaultSection = "hosts";
-export type SettingsSection = "data" | "shortcuts" | "terminal" | "about";
+export type SettingsSection = "data" | "shortcuts" | "preferences" | "about";
 
 export interface ProfileFormState {
   name: string;

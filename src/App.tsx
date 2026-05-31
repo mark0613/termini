@@ -8,11 +8,10 @@ import {
   type AppPage,
   type ProfileFormState,
   type SettingsSection,
-  type VaultSection,
 } from "./appTypes";
 import { AppHeader } from "./components/AppHeader";
+import { AppSidebar } from "./components/AppSidebar";
 import { ProfileDrawer } from "./components/ProfileDrawer";
-import { VaultRail } from "./components/VaultRail";
 import { SessionPage } from "./pages/SessionPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { VaultsPage } from "./pages/VaultsPage";
@@ -34,8 +33,6 @@ const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }
 
 function App() {
   const [activePage, setActivePage] = useState<AppPage>("vaults");
-  const [activeVaultSection, setActiveVaultSection] =
-    useState<VaultSection>("hosts");
   const [activeSettingsSection, setActiveSettingsSection] =
     useState<SettingsSection>("data");
   const [vaults, setVaults] = useState<Vault[]>([]);
@@ -525,51 +522,53 @@ function App() {
         onVaultsClick={() => setActivePage("vaults")}
       />
 
-      {activePage === "vaults" ? (
+      {activePage === "vaults" || activePage === "settings" ? (
         <section className="grid min-h-0 grid-cols-[184px_minmax(0,1fr)] bg-[#1b2033]">
-          <VaultRail
-            activeSection={activeVaultSection}
-            onSectionChange={setActiveVaultSection}
-            onSettingsClick={() => setActivePage("settings")}
+          <AppSidebar
+            activePage={activePage}
+            activeSettingsSection={activeSettingsSection}
+            onHostsClick={() => setActivePage("vaults")}
+            onSettingsSectionClick={(section) => {
+              setActiveSettingsSection(section);
+              setActivePage("settings");
+            }}
           />
-          <VaultsPage
-            credentials={credentials}
-            error={error}
-            hostSearch={hostSearch}
-            isBusy={isBusy}
-            profiles={filteredProfiles}
-            selectedProfileId={selectedProfileId}
-            onConnect={connectProfile}
-            onDelete={handleDeleteProfile}
-            onEdit={openEditProfileDrawer}
-            onNew={openNewProfileDrawer}
-            onSearchChange={setHostSearch}
-            onSelect={setSelectedProfileId}
-            onClearSelection={() => setSelectedProfileId("")}
-          />
+          {activePage === "vaults" ? (
+            <VaultsPage
+              credentials={credentials}
+              error={error}
+              hostSearch={hostSearch}
+              isBusy={isBusy}
+              profiles={filteredProfiles}
+              selectedProfileId={selectedProfileId}
+              onConnect={connectProfile}
+              onDelete={handleDeleteProfile}
+              onEdit={openEditProfileDrawer}
+              onNew={openNewProfileDrawer}
+              onSearchChange={setHostSearch}
+              onSelect={setSelectedProfileId}
+              onClearSelection={() => setSelectedProfileId("")}
+            />
+          ) : (
+            <SettingsPage
+              activeSection={activeSettingsSection}
+              activeVault={activeVault}
+              exportPassword={exportPassword}
+              exportPath={exportPath}
+              importPassword={importPassword}
+              importPath={importPath}
+              isBusy={isBusy}
+              onChooseExportPath={chooseExportPath}
+              onChooseImportPath={chooseImportPath}
+              onExport={handleExportVault}
+              onExportPasswordChange={setExportPassword}
+              onExportPathChange={setExportPath}
+              onImport={handleImportVault}
+              onImportPasswordChange={setImportPassword}
+              onImportPathChange={setImportPath}
+            />
+          )}
         </section>
-      ) : null}
-
-      {activePage === "settings" ? (
-        <SettingsPage
-          activeSection={activeSettingsSection}
-          activeVault={activeVault}
-          exportPassword={exportPassword}
-          exportPath={exportPath}
-          importPassword={importPassword}
-          importPath={importPath}
-          isBusy={isBusy}
-          onBack={() => setActivePage("vaults")}
-          onChooseExportPath={chooseExportPath}
-          onChooseImportPath={chooseImportPath}
-          onExport={handleExportVault}
-          onExportPasswordChange={setExportPassword}
-          onExportPathChange={setExportPath}
-          onImport={handleImportVault}
-          onImportPasswordChange={setImportPassword}
-          onImportPathChange={setImportPath}
-          onSectionChange={setActiveSettingsSection}
-        />
       ) : null}
 
       <SessionPage
