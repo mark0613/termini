@@ -1,6 +1,6 @@
 use keyring::Entry;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 const SERVICE: &str = "com.user.termini";
 
@@ -14,7 +14,13 @@ pub fn set_password(credential_id: &str, password: &str) -> AppResult<()> {
 }
 
 pub fn get_password(credential_id: &str) -> AppResult<String> {
-    Ok(entry(credential_id)?.get_password()?)
+    match entry(credential_id)?.get_password() {
+        Ok(password) => Ok(password),
+        Err(keyring::Error::NoEntry) => Err(AppError::InvalidInput(
+            "saved password is missing; edit this host and re-enter its password".to_string(),
+        )),
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub fn delete_password(credential_id: &str) -> AppResult<()> {

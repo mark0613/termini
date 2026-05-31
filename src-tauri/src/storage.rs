@@ -138,14 +138,15 @@ impl Storage {
     ) -> AppResult<Credential> {
         let label = clean_required(label, "credential label")?;
         let username = clean_required(username, "credential username")?;
+        let has_new_password = password.is_some();
         let updated_at = now();
         let conn = self.conn.lock().expect("storage mutex poisoned");
 
         conn.execute(
             "UPDATE credentials
-             SET label = ?1, username = ?2, updated_at = ?3
-             WHERE id = ?4",
-            params![label, username, updated_at, id],
+             SET label = ?1, username = ?2, has_password = CASE WHEN ?3 = 1 THEN 1 ELSE has_password END, updated_at = ?4
+             WHERE id = ?5",
+            params![label, username, i64::from(has_new_password), updated_at, id],
         )?;
         drop(conn);
 

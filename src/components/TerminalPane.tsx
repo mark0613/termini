@@ -27,11 +27,16 @@ export function TerminalPane({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const tailRef = useRef("");
   const sessionIdRef = useRef<string | null>(pane.sessionId);
+  const connectedRef = useRef(pane.status === "connected");
+  const lastDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
+  const lastNoticeRef = useRef("");
   const [promptVisible, setPromptVisible] = useState(false);
 
   useEffect(() => {
     sessionIdRef.current = pane.sessionId;
-  }, [pane.sessionId]);
+    connectedRef.current = pane.status === "connected";
+    resizeBackend();
+  }, [pane.sessionId, pane.status]);
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -60,18 +65,20 @@ export function TerminalPane({
     terminal.onData((data) => {
       setPromptVisible(false);
       const sessionId = sessionIdRef.current;
-      if (sessionId) {
-        void api.writeSsh({ sessionId, data });
+      if (connectedRef.current && sessionId) {
+        void api.writeSsh({ sessionId, data }).catch(() => {});
       }
     });
     terminal.attachCustomKeyEventHandler((event) => {
+      const sessionId = sessionIdRef.current;
       if (
         event.type === "keydown" &&
         event.key === "Tab" &&
         promptVisible &&
-        sessionIdRef.current
+        connectedRef.current &&
+        sessionId
       ) {
-        void api.sendProfilePassword(sessionIdRef.current);
+        void api.sendProfilePassword(sessionId).catch(() => {});
         setPromptVisible(false);
         return false;
       }
@@ -82,18 +89,18 @@ export function TerminalPane({
     fitAddonRef.current = fitAddon;
 
     const dimensions = fitAddon.proposeDimensions();
-    onReady(dimensions?.cols ?? 80, dimensions?.rows ?? 24);
+    lastDimensionsRef.current = {
+      cols: dimensions?.cols ?? 80,
+      rows: dimensions?.rows ?? 24,
+    };
+    onReady(lastDimensionsRef.current.cols, lastDimensionsRef.current.rows);
 
     const observer = new ResizeObserver(() => {
       fitAddon.fit();
       const next = fitAddon.proposeDimensions();
-      const sessionId = sessionIdRef.current;
-      if (sessionId && next) {
-        void api.resizeSsh({
-          sessionId,
-          cols: next.cols,
-          rows: next.rows,
-        });
+      if (next) {
+        lastDimensionsRef.current = { cols: next.cols, rows: next.rows };
+        resizeBackend();
       }
     });
     observer.observe(hostRef.current);
@@ -127,7 +134,51 @@ export function TerminalPane({
     if (pane.status === "connected") {
       terminalRef.current?.clear();
     }
-  }, [pane.sessionId]);
+  }, [pane.sessionId, pane.status]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+
+    const noticeKey = `${pane.sessionId ?? "no-session"}:${pane.status}:${
+      pane.message ?? ""
+    }`;
+    if (lastNoticeRef.current === noticeKey) return;
+    lastNoticeRef.current = noticeKey;
+
+    if (pane.status === "connecting") {
+      terminal.writeln("");
+      terminal.writeln(pane.message ?? "Connecting...");
+      return;
+    }
+
+    if (pane.status === "error") {
+      const message = pane.message ?? "Unknown SSH error";
+      console.error(`[Termini] SSH connection failed for "${pane.title}": ${message}`);
+      terminal.writeln("");
+      terminal.writeln(`Connection failed: ${message}`);
+      return;
+    }
+
+    if (pane.status === "disconnected" || pane.status === "exited") {
+      terminal.writeln("");
+      terminal.writeln(pane.message ?? `SSH session ${pane.status}`);
+    }
+  }, [pane.sessionId, pane.status, pane.message]);
+
+  function resizeBackend() {
+    const sessionId = sessionIdRef.current;
+    const dimensions = lastDimensionsRef.current;
+    if (!connectedRef.current || !sessionId || !dimensions) return;
+
+    void api
+      .resizeSsh({
+        sessionId,
+        cols: dimensions.cols,
+        rows: dimensions.rows,
+      })
+      .catch(() => {});
+  }
 
   function recordOutputTail(data: string) {
     tailRef.current = stripAnsi(`${tailRef.current}${data}`).slice(-500);

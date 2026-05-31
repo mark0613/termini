@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import {
   emptyProfileForm,
@@ -58,6 +58,7 @@ function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Ready");
+  const connectingPaneIdsRef = useRef(new Set<string>());
 
   const activeVault = useMemo(
     () => vaults.find((vault) => vault.id === activeVaultId) ?? null,
@@ -218,9 +219,12 @@ function App() {
   }
 
   async function handlePaneReady(paneId: string, cols: number, rows: number) {
+    if (connectingPaneIdsRef.current.has(paneId)) return;
+
     const tab = tabs.find((item) => findPane(item.root, paneId));
     const pane = tab ? findPane(tab.root, paneId) : null;
     if (!pane?.profileId || pane.sessionId || pane.status !== "pending") return;
+    connectingPaneIdsRef.current.add(paneId);
 
     const sessionId = crypto.randomUUID();
     updatePaneInTabs(paneId, (current) => ({
@@ -269,6 +273,8 @@ function App() {
   }
 
   function closePane(paneId: string) {
+    connectingPaneIdsRef.current.delete(paneId);
+
     setTabs((current) => {
       const nextTabs: TerminalTab[] = [];
 
@@ -280,7 +286,7 @@ function App() {
         }
 
         if (result.removed.sessionId) {
-          void api.disconnectSsh(result.removed.sessionId);
+          void api.disconnectSsh(result.removed.sessionId).catch(() => {});
         }
 
         if (!result.node) continue;
@@ -309,7 +315,8 @@ function App() {
       const tab = current.find((item) => item.id === tabId);
       if (tab) {
         for (const pane of collectPanes(tab.root)) {
-          if (pane.sessionId) void api.disconnectSsh(pane.sessionId);
+          connectingPaneIdsRef.current.delete(pane.id);
+          if (pane.sessionId) void api.disconnectSsh(pane.sessionId).catch(() => {});
         }
       }
 
