@@ -8,6 +8,7 @@ export interface TerminalPaneState {
   profileId: string | null;
   sessionId: string | null;
   title: string;
+  endpoint: string | null;
   status: string;
   message: string | null;
 }
@@ -35,6 +36,9 @@ export function createPane(profile?: SshProfile): TerminalPaneState {
     profileId: profile?.id ?? null,
     sessionId: null,
     title: profile?.name ?? "Shell",
+    endpoint: profile
+      ? `${profile.username}@${profile.host}:${profile.port}`
+      : null,
     status: profile ? "pending" : "idle",
     message: null,
   };
@@ -123,6 +127,7 @@ export function splitPane(
       ...createPane(),
       profileId: node.profileId,
       title: node.title,
+      endpoint: node.endpoint,
       status: node.profileId ? "pending" : "idle",
     };
 
