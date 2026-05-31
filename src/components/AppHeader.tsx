@@ -1,6 +1,9 @@
 import { Database, Minus, Square, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { AppPage } from "../appTypes";
 import type { TerminalTab } from "../terminalTree";
+
+const appWindow = getCurrentWindow();
 
 export function AppHeader({
   activePage,
@@ -17,8 +20,19 @@ export function AppHeader({
   onSelectTab: (tabId: string) => void;
   onVaultsClick: () => void;
 }) {
+  async function handleHeaderMouseDown(event: React.MouseEvent<HTMLElement>) {
+    if (event.button !== 0 || isWindowControlTarget(event.target)) {
+      return;
+    }
+
+    await appWindow.startDragging();
+  }
+
   return (
-    <header className="flex min-w-0 items-center justify-between border-b border-[#2b3044] bg-[#111426] px-3">
+    <header
+      className="flex min-w-0 items-center justify-between border-b border-[#2b3044] bg-[#111426] px-3"
+      onMouseDown={handleHeaderMouseDown}
+    >
       <div className="flex min-w-0 items-center gap-2">
         <TopPageButton
           active={activePage === "vaults"}
@@ -39,10 +53,20 @@ export function AppHeader({
         ))}
       </div>
 
-      <div className="flex items-center gap-2 text-[#8d93ad]">
-        <Minus size={14} />
-        <Square size={12} />
-        <X size={16} />
+      <div className="flex items-center text-[#8d93ad]">
+        <WindowButton label="Minimize" onClick={() => appWindow.minimize()}>
+          <Minus size={16} />
+        </WindowButton>
+        <WindowButton label="Maximize" onClick={() => appWindow.toggleMaximize()}>
+          <Square size={14} />
+        </WindowButton>
+        <WindowButton
+          label="Close"
+          onClick={() => appWindow.close()}
+          variant="danger"
+        >
+          <X size={17} />
+        </WindowButton>
       </div>
     </header>
   );
@@ -110,5 +134,38 @@ function HostTabButton({
         <X size={14} />
       </button>
     </div>
+  );
+}
+
+function isWindowControlTarget(target: EventTarget) {
+  return target instanceof Element && Boolean(target.closest("button"));
+}
+
+function WindowButton({
+  children,
+  label,
+  onClick,
+  variant = "default",
+}: {
+  children: React.ReactNode;
+  label: string;
+  onClick: () => Promise<void>;
+  variant?: "default" | "danger";
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className={`grid size-9 place-items-center rounded-md ${
+        variant === "danger"
+          ? "hover:bg-[#ff5c7a] hover:text-white"
+          : "hover:bg-[#262b42] hover:text-white"
+      }`}
+      onClick={() => {
+        void onClick();
+      }}
+    >
+      {children}
+    </button>
   );
 }
