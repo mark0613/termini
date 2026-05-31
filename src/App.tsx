@@ -83,11 +83,6 @@ function App() {
         .includes(query),
     );
   }, [hostSearch, profiles]);
-  const sessionPaneCount = useMemo(
-    () => tabs.reduce((total, tab) => total + collectPanes(tab.root).length, 0),
-    [tabs],
-  );
-
   useEffect(() => {
     void runAction(async () => {
       await refreshVaults();
@@ -578,7 +573,6 @@ function App() {
           activeTab={activeTab}
           activeVault={activeVault}
           profiles={profiles}
-          sessionPaneCount={sessionPaneCount}
           onClosePane={closePane}
           onConnect={connectProfile}
           onFocusPane={(paneId) =>
@@ -589,7 +583,6 @@ function App() {
             )
           }
           onPaneReady={handlePaneReady}
-          onSplit={splitActivePane}
         />
       ) : null}
 
