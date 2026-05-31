@@ -31,6 +31,10 @@ import type { Credential, SshProfile, SshStatusEvent, Vault } from "./types";
 
 const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
 
+function getErrorMessage(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
+}
+
 function App() {
   const [activePage, setActivePage] = useState<AppPage>("vaults");
   const [activeSettingsSection, setActiveSettingsSection] =
@@ -48,8 +52,10 @@ function App() {
   const [hostSearch, setHostSearch] = useState("");
   const [exportPath, setExportPath] = useState("");
   const [exportPassword, setExportPassword] = useState("");
+  const [exportError, setExportError] = useState("");
   const [importPath, setImportPath] = useState("");
   const [importPassword, setImportPassword] = useState("");
+  const [importError, setImportError] = useState("");
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -167,7 +173,7 @@ function App() {
     try {
       await action();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(getErrorMessage(err));
     } finally {
       setIsBusy(false);
     }
@@ -465,6 +471,7 @@ function App() {
     });
     if (selectedPath) {
       setExportPath(selectedPath);
+      setExportError("");
     }
   }
 
@@ -476,36 +483,75 @@ function App() {
     });
     if (typeof selectedPath === "string") {
       setImportPath(selectedPath);
+      setImportError("");
     }
   }
 
   async function handleExportVault(event: FormEvent) {
     event.preventDefault();
-    if (!activeVault) return;
-    await runAction(async () => {
+    setExportError("");
+    if (!activeVault) {
+      setExportError("No active vault.");
+      return;
+    }
+
+    const path = exportPath.trim();
+    const password = exportPassword.trim();
+    if (!path) {
+      setExportError("Export path is required.");
+      return;
+    }
+    if (!password) {
+      setExportError("Export password is required.");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
       await api.exportVault({
         vaultId: activeVault.id,
-        path: exportPath,
-        password: exportPassword,
+        path,
+        password,
       });
       setExportPassword("");
-      setStatus(`Vault exported: ${exportPath}`);
-    });
+      setStatus(`Vault exported: ${path}`);
+    } catch (err) {
+      setExportError(getErrorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   async function handleImportVault(event: FormEvent) {
     event.preventDefault();
-    await runAction(async () => {
+    setImportError("");
+    const path = importPath.trim();
+    const password = importPassword.trim();
+    if (!path) {
+      setImportError("Import path is required.");
+      return;
+    }
+    if (!password) {
+      setImportError("Import password is required.");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
       const result = await api.importVault({
-        path: importPath,
-        password: importPassword,
+        path,
+        password,
       });
       setImportPassword("");
       setStatus(
         `Imported ${result.credentialsImported} identities and ${result.profilesImported} hosts`,
       );
       await refreshVaults(result.vault.id);
-    });
+    } catch (err) {
+      setImportError(getErrorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   return (
@@ -553,19 +599,33 @@ function App() {
             <SettingsPage
               activeSection={activeSettingsSection}
               activeVault={activeVault}
+              exportError={exportError}
               exportPassword={exportPassword}
               exportPath={exportPath}
+              importError={importError}
               importPassword={importPassword}
               importPath={importPath}
               isBusy={isBusy}
               onChooseExportPath={chooseExportPath}
               onChooseImportPath={chooseImportPath}
               onExport={handleExportVault}
-              onExportPasswordChange={setExportPassword}
-              onExportPathChange={setExportPath}
+              onExportPasswordChange={(value) => {
+                setExportPassword(value);
+                setExportError("");
+              }}
+              onExportPathChange={(value) => {
+                setExportPath(value);
+                setExportError("");
+              }}
               onImport={handleImportVault}
-              onImportPasswordChange={setImportPassword}
-              onImportPathChange={setImportPath}
+              onImportPasswordChange={(value) => {
+                setImportPassword(value);
+                setImportError("");
+              }}
+              onImportPathChange={(value) => {
+                setImportPath(value);
+                setImportError("");
+              }}
             />
           )}
         </section>
