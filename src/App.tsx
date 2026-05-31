@@ -141,31 +141,42 @@ function App() {
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
-      if (!event.altKey || !event.shiftKey || !activeTab) return;
+      if (!event.altKey || !event.shiftKey || !activeTab || activePage !== "session") {
+        return;
+      }
 
-      if (event.key.toLowerCase() === "d") {
+      const key = event.key.toLowerCase();
+      if (key === "d") {
         event.preventDefault();
+        event.stopPropagation();
         splitActivePane(
           window.innerWidth >= window.innerHeight ? "vertical" : "horizontal",
         );
         return;
       }
 
-      if (event.key === "+" || event.key === "=") {
+      if (event.key === "+" || event.key === "=" || event.code === "NumpadAdd") {
         event.preventDefault();
+        event.stopPropagation();
         splitActivePane("vertical");
         return;
       }
 
-      if (event.key === "-") {
+      if (
+        event.key === "-" ||
+        event.key === "_" ||
+        event.code === "Minus" ||
+        event.code === "NumpadSubtract"
+      ) {
         event.preventDefault();
+        event.stopPropagation();
         splitActivePane("horizontal");
       }
     }
 
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, [activeTabId, activeTab?.activePaneId]);
+    window.addEventListener("keydown", handleShortcut, true);
+    return () => window.removeEventListener("keydown", handleShortcut, true);
+  }, [activePage, activeTabId, activeTab?.activePaneId]);
 
   async function runAction(action: () => Promise<void>) {
     setIsBusy(true);
