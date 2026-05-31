@@ -1,4 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import * as api from "./api";
 import { SplitWorkspace } from "./components/SplitWorkspace";
@@ -43,6 +44,7 @@ const emptyProfileForm: ProfileFormState = {
   username: "",
   credentialId: "",
 };
+const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
 
 function App() {
   const [vaults, setVaults] = useState<Vault[]>([]);
@@ -424,6 +426,28 @@ function App() {
       setStatus("Profile deleted");
       await refreshVaultData(activeVault.id);
     });
+  }
+
+  async function chooseExportPath() {
+    const selectedPath = await save({
+      title: "Export Termini vault",
+      defaultPath: "termini-vault.json",
+      filters: vaultFileFilters,
+    });
+    if (selectedPath) {
+      setExportPath(selectedPath);
+    }
+  }
+
+  async function chooseImportPath() {
+    const selectedPath = await open({
+      title: "Import Termini vault",
+      multiple: false,
+      filters: vaultFileFilters,
+    });
+    if (typeof selectedPath === "string") {
+      setImportPath(selectedPath);
+    }
   }
 
   async function handleExportVault(event: FormEvent) {
@@ -868,12 +892,21 @@ function App() {
               <section className="grid gap-2">
                 <h2 className="text-sm font-semibold">Import / Export</h2>
                 <form className="grid gap-2" onSubmit={handleExportVault}>
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={exportPath}
-                    onChange={(event) => setExportPath(event.currentTarget.value)}
-                    placeholder="Export path"
-                  />
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                    <input
+                      className="min-w-0 rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                      value={exportPath}
+                      onChange={(event) => setExportPath(event.currentTarget.value)}
+                      placeholder="Export path"
+                    />
+                    <button
+                      type="button"
+                      className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
+                      onClick={chooseExportPath}
+                    >
+                      Browse
+                    </button>
+                  </div>
                   <input
                     className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
                     value={exportPassword}
@@ -884,29 +917,38 @@ function App() {
                   <button
                     type="submit"
                     className="h-9 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
-                    disabled={!activeVault || isBusy}
+                    disabled={!activeVault || !exportPath || isBusy}
                   >
                     Export
                   </button>
                 </form>
                 <form className="grid gap-2" onSubmit={handleImportVault}>
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={importPath}
-                    onChange={(event) => setImportPath(event.currentTarget.value)}
-                    placeholder="Import path"
-                  />
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                    <input
+                      className="min-w-0 rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
+                      value={importPath}
+                      onChange={(event) => setImportPath(event.currentTarget.value)}
+                      placeholder="Import path"
+                    />
+                    <button
+                      type="button"
+                      className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
+                      onClick={chooseImportPath}
+                    >
+                      Browse
+                    </button>
+                  </div>
                   <input
                     className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
                     value={importPassword}
                     onChange={(event) => setImportPassword(event.currentTarget.value)}
-                    placeholder="Export password"
+                    placeholder="Import password"
                     type="password"
                   />
                   <button
                     type="submit"
                     className="h-9 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
-                    disabled={isBusy}
+                    disabled={!importPath || isBusy}
                   >
                     Import
                   </button>
