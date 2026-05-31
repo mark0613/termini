@@ -1,8 +1,21 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import * as api from "./api";
-import { SplitWorkspace } from "./components/SplitWorkspace";
+import {
+  emptyProfileForm,
+  toProfileForm,
+  type AppPage,
+  type ProfileFormState,
+  type SettingsSection,
+  type VaultSection,
+} from "./appTypes";
+import { AppHeader } from "./components/AppHeader";
+import { ProfileDrawer } from "./components/ProfileDrawer";
+import { VaultRail } from "./components/VaultRail";
+import { SessionPage } from "./pages/SessionPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { VaultsPage } from "./pages/VaultsPage";
 import {
   collectPanes,
   createTab,
@@ -17,54 +30,31 @@ import {
 } from "./terminalTree";
 import type { Credential, SshProfile, SshStatusEvent, Vault } from "./types";
 
-interface CredentialFormState {
-  label: string;
-  username: string;
-  password: string;
-}
-
-interface ProfileFormState {
-  name: string;
-  host: string;
-  port: string;
-  username: string;
-  credentialId: string;
-}
-
-const firstTab = createTab();
-const emptyCredentialForm: CredentialFormState = {
-  label: "",
-  username: "",
-  password: "",
-};
-const emptyProfileForm: ProfileFormState = {
-  name: "",
-  host: "",
-  port: "22",
-  username: "",
-  credentialId: "",
-};
 const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
 
 function App() {
+  const [activePage, setActivePage] = useState<AppPage>("vaults");
+  const [activeVaultSection, setActiveVaultSection] =
+    useState<VaultSection>("hosts");
+  const [activeSettingsSection, setActiveSettingsSection] =
+    useState<SettingsSection>("data");
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [activeVaultId, setActiveVaultId] = useState("");
-  const [vaultName, setVaultName] = useState("");
-  const [newVaultName, setNewVaultName] = useState("");
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [profiles, setProfiles] = useState<SshProfile[]>([]);
-  const [credentialForm, setCredentialForm] =
-    useState<CredentialFormState>(emptyCredentialForm);
-  const [editingCredentialId, setEditingCredentialId] = useState("");
   const [profileForm, setProfileForm] =
     useState<ProfileFormState>(emptyProfileForm);
   const [editingProfileId, setEditingProfileId] = useState("");
+  const [profileDrawerOpen, setProfileDrawerOpen] = useState(false);
+  const [profileDrawerError, setProfileDrawerError] = useState("");
+  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [hostSearch, setHostSearch] = useState("");
   const [exportPath, setExportPath] = useState("");
   const [exportPassword, setExportPassword] = useState("");
   const [importPath, setImportPath] = useState("");
   const [importPassword, setImportPassword] = useState("");
-  const [tabs, setTabs] = useState<TerminalTab[]>([firstTab]);
-  const [activeTabId, setActiveTabId] = useState(firstTab.id);
+  const [tabs, setTabs] = useState<TerminalTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Ready");
@@ -74,8 +64,27 @@ function App() {
     [activeVaultId, vaults],
   );
   const activeTab = useMemo(
-    () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0],
+    () => tabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, tabs],
+  );
+  const filteredProfiles = useMemo(() => {
+    const query = hostSearch.trim().toLowerCase();
+    if (!query) return profiles;
+    return profiles.filter((profile) =>
+      [
+        profile.name,
+        profile.host,
+        profile.username,
+        `${profile.username}@${profile.host}`,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [hostSearch, profiles]);
+  const sessionPaneCount = useMemo(
+    () => tabs.reduce((total, tab) => total + collectPanes(tab.root).length, 0),
+    [tabs],
   );
 
   useEffect(() => {
@@ -108,16 +117,25 @@ function App() {
     if (!activeVaultId) {
       setCredentials([]);
       setProfiles([]);
-      setVaultName("");
+      setSelectedProfileId("");
       return;
     }
 
-    const vault = vaults.find((item) => item.id === activeVaultId);
-    setVaultName(vault?.name ?? "");
     void runAction(async () => {
       await refreshVaultData(activeVaultId);
     });
   }, [activeVaultId, vaults]);
+
+  useEffect(() => {
+    if (!profiles.length) {
+      setSelectedProfileId("");
+      return;
+    }
+
+    if (!profiles.some((profile) => profile.id === selectedProfileId)) {
+      setSelectedProfileId(profiles[0].id);
+    }
+  }, [profiles, selectedProfileId]);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -195,6 +213,8 @@ function App() {
     const tab = createTab(profile);
     setTabs((current) => [...current, tab]);
     setActiveTabId(tab.id);
+    setActivePage("session");
+    setStatus(`Opening ${profile.name}`);
   }
 
   async function handlePaneReady(paneId: string, cols: number, rows: number) {
@@ -270,13 +290,14 @@ function App() {
       }
 
       if (nextTabs.length === 0) {
-        const tab = createTab();
-        setActiveTabId(tab.id);
-        return [tab];
+        setActiveTabId("");
+        setActivePage("vaults");
+        return [];
       }
 
       if (!nextTabs.some((tab) => tab.id === activeTabId)) {
         setActiveTabId(nextTabs[0].id);
+        setActivePage("session");
       }
 
       return nextTabs;
@@ -294,138 +315,144 @@ function App() {
 
       const remaining = current.filter((item) => item.id !== tabId);
       if (remaining.length === 0) {
-        const next = createTab();
-        setActiveTabId(next.id);
-        return [next];
+        setActiveTabId("");
+        setActivePage("vaults");
+        return [];
       }
 
       if (activeTabId === tabId) {
         setActiveTabId(remaining[0].id);
+        setActivePage("session");
       }
       return remaining;
     });
   }
 
-  function selectCredential(credential: Credential) {
-    setEditingCredentialId(credential.id);
-    setCredentialForm({
-      label: credential.label,
-      username: credential.username,
-      password: "",
-    });
+  function openNewProfileDrawer() {
+    setEditingProfileId("");
+    setProfileForm(emptyProfileForm);
+    setProfileDrawerError("");
+    setProfileDrawerOpen(true);
   }
 
-  function selectProfile(profile: SshProfile) {
+  function openEditProfileDrawer(profile: SshProfile) {
     setEditingProfileId(profile.id);
-    setProfileForm({
-      name: profile.name,
-      host: profile.host,
-      port: String(profile.port),
-      username: profile.username,
-      credentialId: profile.credentialId ?? "",
-    });
-  }
-
-  async function handleCreateVault(event: FormEvent) {
-    event.preventDefault();
-    await runAction(async () => {
-      const vault = await api.createVault(newVaultName);
-      setNewVaultName("");
-      setStatus(`Vault created: ${vault.name}`);
-      await refreshVaults(vault.id);
-    });
-  }
-
-  async function handleSaveVault(event: FormEvent) {
-    event.preventDefault();
-    if (!activeVault) return;
-    await runAction(async () => {
-      const vault = await api.updateVault(activeVault.id, vaultName);
-      setStatus(`Vault renamed: ${vault.name}`);
-      await refreshVaults(vault.id);
-    });
-  }
-
-  async function handleDeleteVault() {
-    if (!activeVault) return;
-    await runAction(async () => {
-      await api.deleteVault(activeVault.id);
-      setStatus(`Vault deleted: ${activeVault.name}`);
-      await refreshVaults();
-    });
-  }
-
-  async function handleSaveCredential(event: FormEvent) {
-    event.preventDefault();
-    if (!activeVault) return;
-    await runAction(async () => {
-      if (editingCredentialId) {
-        await api.updateCredential({
-          id: editingCredentialId,
-          label: credentialForm.label,
-          username: credentialForm.username,
-          password: credentialForm.password || undefined,
-        });
-        setStatus(`Credential updated: ${credentialForm.label}`);
-      } else {
-        await api.createCredential({
-          vaultId: activeVault.id,
-          label: credentialForm.label,
-          username: credentialForm.username,
-          password: credentialForm.password,
-        });
-        setStatus(`Credential created: ${credentialForm.label}`);
-      }
-
-      setCredentialForm(emptyCredentialForm);
-      setEditingCredentialId("");
-      await refreshVaultData(activeVault.id);
-    });
-  }
-
-  async function handleDeleteCredential(id: string) {
-    if (!activeVault) return;
-    await runAction(async () => {
-      await api.deleteCredential(id);
-      setStatus("Credential deleted");
-      await refreshVaultData(activeVault.id);
-    });
+    setProfileForm(toProfileForm(profile));
+    setProfileDrawerError("");
+    setProfileDrawerOpen(true);
   }
 
   async function handleSaveProfile(event: FormEvent) {
     event.preventDefault();
-    if (!activeVault) return;
+    if (!activeVault) {
+      setProfileDrawerError("No active vault.");
+      return;
+    }
 
-    const payload = {
-      credentialId: profileForm.credentialId || null,
-      name: profileForm.name,
-      host: profileForm.host,
-      port: Number(profileForm.port || 22),
-      username: profileForm.username,
-    };
+    const name = profileForm.name.trim();
+    const host = profileForm.host.trim();
+    const username = profileForm.username.trim();
+    const password = profileForm.password;
+    const port = Number(profileForm.port || 22);
 
-    await runAction(async () => {
+    if (!name || !host || !username || !profileForm.port.trim()) {
+      setProfileDrawerError("Label, Host / IP address, Username, and Port are required.");
+      return;
+    }
+
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      setProfileDrawerError("Port must be a number between 1 and 65535.");
+      return;
+    }
+
+    if (!editingProfileId && !password.trim() && !profileForm.credentialId) {
+      setProfileDrawerError("Password is required for password SSH login.");
+      return;
+    }
+
+    setIsBusy(true);
+    setError("");
+    setProfileDrawerError("");
+    try {
+      let credentialId = profileForm.credentialId || null;
+      if (password.trim()) {
+        if (credentialId) {
+          await api.updateCredential({
+            id: credentialId,
+            label: `${name} password`,
+            username,
+            password,
+          });
+        } else {
+          const credential = await api.createCredential({
+            vaultId: activeVault.id,
+            label: `${name} password`,
+            username,
+            password,
+          });
+          credentialId = credential.id;
+        }
+      }
+
+      const payload = {
+        credentialId,
+        name,
+        host,
+        port,
+        username,
+      };
+
       if (editingProfileId) {
-        await api.updateProfile({ id: editingProfileId, ...payload });
-        setStatus(`Profile updated: ${profileForm.name}`);
+        const profile = await api.updateProfile({ id: editingProfileId, ...payload });
+        setSelectedProfileId(profile.id);
+        setStatus(`Host updated: ${profileForm.name}`);
       } else {
-        await api.createProfile({ vaultId: activeVault.id, ...payload });
-        setStatus(`Profile created: ${profileForm.name}`);
+        const profile = await api.createProfile({ vaultId: activeVault.id, ...payload });
+        setSelectedProfileId(profile.id);
+        setStatus(`Host created: ${profileForm.name}`);
       }
 
       setProfileForm(emptyProfileForm);
       setEditingProfileId("");
+      setProfileDrawerOpen(false);
       await refreshVaultData(activeVault.id);
-    });
+    } catch (err) {
+      setProfileDrawerError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   async function handleDeleteProfile(id: string) {
     if (!activeVault) return;
+    const profile = profiles.find((item) => item.id === id);
+    const confirmed = await confirmDelete(
+      `Delete host "${profile?.name ?? "selected host"}"?`,
+      "Delete host",
+    );
+    if (!confirmed) return;
+
     await runAction(async () => {
       await api.deleteProfile(id);
-      setStatus("Profile deleted");
+      setStatus("Host deleted");
+      setProfileDrawerOpen(false);
+      setSelectedProfileId("");
       await refreshVaultData(activeVault.id);
     });
+  }
+
+  async function confirmDelete(message: string, title: string) {
+    try {
+      return await confirm(message, {
+        title,
+        kind: "warning",
+        okLabel: "Delete",
+        cancelLabel: "Cancel",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    }
   }
 
   async function chooseExportPath() {
@@ -473,500 +500,111 @@ function App() {
       });
       setImportPassword("");
       setStatus(
-        `Imported ${result.credentialsImported} credentials and ${result.profilesImported} profiles`,
+        `Imported ${result.credentialsImported} identities and ${result.profilesImported} hosts`,
       );
       await refreshVaults(result.vault.id);
     });
   }
 
   return (
-    <main className="grid h-dvh w-full grid-cols-[300px_minmax(0,1fr)] overflow-hidden bg-[#11161c] text-[#e7edf3] max-[900px]:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="flex min-w-0 flex-col border-r border-[#25313c] bg-[#161d24]">
-        <div className="flex min-h-[72px] items-center gap-3 border-b border-[#25313c] p-4">
-          <span className="grid size-9 place-items-center rounded-lg bg-[#55c2a2] font-extrabold text-[#081117]">
-            T
-          </span>
-          <div className="min-w-0">
-            <h1 className="truncate text-lg leading-6 font-semibold">Termini</h1>
-            <p className="truncate text-xs leading-4 text-[#8fa1b2]">
-              Local SSH vault
-            </p>
-          </div>
-        </div>
+    <main className="grid h-dvh w-full grid-rows-[50px_minmax(0,1fr)_28px] overflow-hidden bg-[#191d2d] text-[#f4f6fb]">
+      <AppHeader
+        activePage={activePage}
+        activeTabId={activeTabId}
+        tabs={tabs}
+        onCloseTab={closeTab}
+        onSelectTab={(tabId) => {
+          setActiveTabId(tabId);
+          setActivePage("session");
+        }}
+        onVaultsClick={() => setActivePage("vaults")}
+      />
 
-        <section className="border-b border-[#25313c] p-3">
-          <form className="flex gap-2" onSubmit={handleCreateVault}>
-            <input
-              className="min-w-0 flex-1 rounded-md border border-[#334353] bg-[#10161d] px-2.5 py-2 text-sm outline-none focus:border-[#55c2a2]"
-              value={newVaultName}
-              onChange={(event) => setNewVaultName(event.currentTarget.value)}
-              placeholder="New vault"
-            />
-            <button
-              type="submit"
-              className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md border border-[#334353] bg-[#1d2731] hover:bg-[#263442]"
-              disabled={isBusy}
-              aria-label="新增 vault"
-            >
-              +
-            </button>
-          </form>
+      {activePage === "vaults" ? (
+        <section className="grid min-h-0 grid-cols-[184px_minmax(0,1fr)] bg-[#1b2033]">
+          <VaultRail
+            activeSection={activeVaultSection}
+            onSectionChange={setActiveVaultSection}
+            onSettingsClick={() => setActivePage("settings")}
+          />
+          <VaultsPage
+            credentials={credentials}
+            error={error}
+            hostSearch={hostSearch}
+            isBusy={isBusy}
+            profiles={filteredProfiles}
+            selectedProfileId={selectedProfileId}
+            onConnect={connectProfile}
+            onDelete={handleDeleteProfile}
+            onEdit={openEditProfileDrawer}
+            onNew={openNewProfileDrawer}
+            onSearchChange={setHostSearch}
+            onSelect={setSelectedProfileId}
+          />
         </section>
+      ) : null}
 
-        <section className="border-b border-[#25313c] p-3">
-          <h2 className="mb-2 text-xs font-bold tracking-normal text-[#8fa1b2] uppercase">
-            Vaults
-          </h2>
-          <div className="grid max-h-40 gap-1 overflow-auto">
-            {vaults.map((vault) => (
-              <button
-                key={vault.id}
-                type="button"
-                className={`min-h-9 cursor-pointer rounded-md border px-2.5 text-left text-sm ${
-                  vault.id === activeVaultId
-                    ? "border-[#2e6f5d] bg-[#1f3a34] text-[#d9e3ec]"
-                    : "border-transparent text-[#8fa1b2] hover:bg-[#1d2731] hover:text-[#d9e3ec]"
-                }`}
-                onClick={() => setActiveVaultId(vault.id)}
-              >
-                <span className="block truncate">{vault.name}</span>
-              </button>
-            ))}
-          </div>
-        </section>
+      {activePage === "settings" ? (
+        <SettingsPage
+          activeSection={activeSettingsSection}
+          activeVault={activeVault}
+          exportPassword={exportPassword}
+          exportPath={exportPath}
+          importPassword={importPassword}
+          importPath={importPath}
+          isBusy={isBusy}
+          onBack={() => setActivePage("vaults")}
+          onChooseExportPath={chooseExportPath}
+          onChooseImportPath={chooseImportPath}
+          onExport={handleExportVault}
+          onExportPasswordChange={setExportPassword}
+          onExportPathChange={setExportPath}
+          onImport={handleImportVault}
+          onImportPasswordChange={setImportPassword}
+          onImportPathChange={setImportPath}
+          onSectionChange={setActiveSettingsSection}
+        />
+      ) : null}
 
-        <section className="flex min-h-0 flex-1 flex-col p-3">
-          <h2 className="mb-2 text-xs font-bold tracking-normal text-[#8fa1b2] uppercase">
-            Connections
-          </h2>
-          <div className="grid gap-2 overflow-auto">
-            {profiles.map((profile) => (
-              <div
-                key={profile.id}
-                className="grid gap-2 rounded-md border border-[#25313c] bg-[#10161d] p-2"
-              >
-                <button
-                  type="button"
-                  className="min-w-0 text-left"
-                  onClick={() => selectProfile(profile)}
-                >
-                  <span className="block truncate text-sm font-medium">
-                    {profile.name}
-                  </span>
-                  <span className="block truncate text-xs text-[#8fa1b2]">
-                    {profile.username}@{profile.host}:{profile.port}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="h-8 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-2 text-xs hover:bg-[#294b43]"
-                  onClick={() => connectProfile(profile)}
-                >
-                  Connect
-                </button>
-              </div>
-            ))}
-            {profiles.length === 0 ? (
-              <p className="rounded-md border border-dashed border-[#334353] p-3 text-sm text-[#8fa1b2]">
-                No SSH profiles yet.
-              </p>
-            ) : null}
-          </div>
-        </section>
-      </aside>
+      {activePage === "session" ? (
+        <SessionPage
+          activeTab={activeTab}
+          activeVault={activeVault}
+          profiles={profiles}
+          sessionPaneCount={sessionPaneCount}
+          onClosePane={closePane}
+          onConnect={connectProfile}
+          onFocusPane={(paneId) =>
+            setTabs((current) =>
+              current.map((tab) =>
+                tab.id === activeTabId ? { ...tab, activePaneId: paneId } : tab,
+              ),
+            )
+          }
+          onPaneReady={handlePaneReady}
+          onSplit={splitActivePane}
+        />
+      ) : null}
 
-      <section className="grid h-full min-w-0 grid-rows-[44px_minmax(0,1fr)_28px]">
-        <header className="flex items-end gap-1 overflow-hidden border-b border-[#25313c] bg-[#151b22] px-2 pt-1.5">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={`flex h-9 min-w-32 max-w-56 items-center rounded-t-lg border border-b-0 border-[#25313c] ${
-                tab.id === activeTabId ? "bg-[#202b35]" : "bg-[#151b22]"
-              }`}
-            >
-              <button
-                type="button"
-                className="min-w-0 flex-1 cursor-pointer px-3 text-left text-sm"
-                onClick={() => setActiveTabId(tab.id)}
-              >
-                <span className="block truncate">{tab.title}</span>
-              </button>
-              <button
-                type="button"
-                className="h-full px-2 text-[#8fa1b2] hover:text-[#ffb8c0]"
-                onClick={() => closeTab(tab.id)}
-              >
-                x
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="mb-1 grid size-7 cursor-pointer place-items-center rounded-md border border-[#334353] bg-[#1d2731] hover:bg-[#263442]"
-            onClick={() => {
-              const tab = createTab();
-              setTabs((current) => [...current, tab]);
-              setActiveTabId(tab.id);
-            }}
-            aria-label="新增 tab"
-          >
-            +
-          </button>
-        </header>
+      <footer className="flex min-w-0 items-center justify-between border-t border-[#2b3044] bg-[#15192a] px-3 text-xs text-[#8d93ad]">
+        <span className="truncate">{isBusy ? "Working..." : status}</span>
+        <span className="truncate">
+          {profiles.length} hosts · {tabs.length} sessions
+        </span>
+      </footer>
 
-        <section className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_390px] gap-3 overflow-hidden bg-[#0d1116] p-3 max-[1180px]:grid-cols-1">
-          <div className="grid min-h-0 min-w-0 grid-rows-[36px_minmax(0,1fr)] gap-2">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="h-8 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-xs hover:bg-[#263442]"
-                onClick={() => splitActivePane("vertical")}
-              >
-                Split vertical
-              </button>
-              <button
-                type="button"
-                className="h-8 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-xs hover:bg-[#263442]"
-                onClick={() => splitActivePane("horizontal")}
-              >
-                Split horizontal
-              </button>
-            </div>
-            {activeTab ? (
-              <SplitWorkspace
-                node={activeTab.root}
-                activePaneId={activeTab.activePaneId}
-                onFocusPane={(paneId) =>
-                  setTabs((current) =>
-                    current.map((tab) =>
-                      tab.id === activeTabId ? { ...tab, activePaneId: paneId } : tab,
-                    ),
-                  )
-                }
-                onPaneReady={handlePaneReady}
-                onClosePane={closePane}
-              />
-            ) : null}
-          </div>
-
-          <aside className="min-h-0 overflow-auto rounded-lg border border-[#25313c] bg-[#151b22] p-4">
-            <div className="grid gap-4">
-              {error ? (
-                <div className="rounded-md border border-[#7f3333] bg-[#321b1b] px-3 py-2 text-sm text-[#ffc9c9]">
-                  {error}
-                </div>
-              ) : null}
-
-              <form className="grid gap-2" onSubmit={handleSaveVault}>
-                <h2 className="text-sm font-semibold">Vault</h2>
-                <input
-                  className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                  value={vaultName}
-                  onChange={(event) => setVaultName(event.currentTarget.value)}
-                  disabled={!activeVault || isBusy}
-                  placeholder="Vault name"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
-                    disabled={!activeVault || isBusy}
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    className="h-9 rounded-md border border-[#553238] bg-[#2a171b] px-3 text-sm text-[#ffb8c0] hover:bg-[#3a1f25] disabled:opacity-50"
-                    disabled={!activeVault || isBusy}
-                    onClick={handleDeleteVault}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </form>
-
-              <section className="grid gap-2">
-                <h2 className="text-sm font-semibold">Credentials</h2>
-                <div className="grid gap-2">
-                  {credentials.map((credential) => (
-                    <div
-                      key={credential.id}
-                      className="rounded-md border border-[#25313c] bg-[#10161d] p-3"
-                    >
-                      <button
-                        type="button"
-                        className="min-w-0 text-left"
-                        onClick={() => selectCredential(credential)}
-                      >
-                        <span className="block truncate text-sm font-medium">
-                          {credential.label}
-                        </span>
-                        <span className="block truncate text-xs text-[#8fa1b2]">
-                          {credential.username}
-                        </span>
-                      </button>
-                      <div className="mt-2 flex justify-between gap-2 text-xs">
-                        <span className="text-[#55c2a2]">
-                          {credential.hasPassword ? "Password saved" : "No password"}
-                        </span>
-                        <button
-                          type="button"
-                          className="text-[#ffb8c0] hover:text-[#ffd1d6]"
-                          onClick={() => handleDeleteCredential(credential.id)}
-                          disabled={isBusy}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <form className="grid gap-2" onSubmit={handleSaveCredential}>
-                  <h3 className="text-sm font-semibold">
-                    {editingCredentialId ? "Edit credential" : "New credential"}
-                  </h3>
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={credentialForm.label}
-                    onChange={(event) =>
-                      setCredentialForm((current) => ({
-                        ...current,
-                        label: event.currentTarget.value,
-                      }))
-                    }
-                    placeholder="Label"
-                  />
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={credentialForm.username}
-                    onChange={(event) =>
-                      setCredentialForm((current) => ({
-                        ...current,
-                        username: event.currentTarget.value,
-                      }))
-                    }
-                    placeholder="Username"
-                  />
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={credentialForm.password}
-                    onChange={(event) =>
-                      setCredentialForm((current) => ({
-                        ...current,
-                        password: event.currentTarget.value,
-                      }))
-                    }
-                    placeholder={
-                      editingCredentialId
-                        ? "New password, leave blank to keep"
-                        : "Password"
-                    }
-                    type="password"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      className="h-9 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-3 text-sm hover:bg-[#294b43] disabled:opacity-50"
-                      disabled={!activeVault || isBusy}
-                    >
-                      {editingCredentialId ? "Update" : "Create"}
-                    </button>
-                    {editingCredentialId ? (
-                      <button
-                        type="button"
-                        className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
-                        onClick={() => {
-                          setEditingCredentialId("");
-                          setCredentialForm(emptyCredentialForm);
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                    {editingProfileId ? (
-                      <button
-                        type="button"
-                        className="h-9 rounded-md border border-[#553238] bg-[#2a171b] px-3 text-sm text-[#ffb8c0] hover:bg-[#3a1f25] disabled:opacity-50"
-                        onClick={() => handleDeleteProfile(editingProfileId)}
-                        disabled={isBusy}
-                      >
-                        Delete
-                      </button>
-                    ) : null}
-                  </div>
-                </form>
-              </section>
-
-              <section className="grid gap-2">
-                <h2 className="text-sm font-semibold">SSH Profile</h2>
-                <form className="grid gap-2" onSubmit={handleSaveProfile}>
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={profileForm.name}
-                    onChange={(event) =>
-                      setProfileForm((current) => ({
-                        ...current,
-                        name: event.currentTarget.value,
-                      }))
-                    }
-                    placeholder="Profile name"
-                  />
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={profileForm.username}
-                    onChange={(event) =>
-                      setProfileForm((current) => ({
-                        ...current,
-                        username: event.currentTarget.value,
-                      }))
-                    }
-                    placeholder="SSH username"
-                  />
-                  <div className="grid grid-cols-[minmax(0,1fr)_90px] gap-2">
-                    <input
-                      className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                      value={profileForm.host}
-                      onChange={(event) =>
-                        setProfileForm((current) => ({
-                          ...current,
-                          host: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="Host"
-                    />
-                    <input
-                      className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                      value={profileForm.port}
-                      onChange={(event) =>
-                        setProfileForm((current) => ({
-                          ...current,
-                          port: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="Port"
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <select
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={profileForm.credentialId}
-                    onChange={(event) =>
-                      setProfileForm((current) => ({
-                        ...current,
-                        credentialId: event.currentTarget.value,
-                      }))
-                    }
-                  >
-                    <option value="">No credential</option>
-                    {credentials.map((credential) => (
-                      <option key={credential.id} value={credential.id}>
-                        {credential.label} ({credential.username})
-                      </option>
-                    ))}
-                  </select>
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      className="h-9 rounded-md border border-[#2e6f5d] bg-[#1f3a34] px-3 text-sm hover:bg-[#294b43] disabled:opacity-50"
-                      disabled={!activeVault || isBusy}
-                    >
-                      {editingProfileId ? "Update" : "Create"}
-                    </button>
-                    {editingProfileId ? (
-                      <button
-                        type="button"
-                        className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
-                        onClick={() => {
-                          setEditingProfileId("");
-                          setProfileForm(emptyProfileForm);
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                </form>
-              </section>
-
-              <section className="grid gap-2">
-                <h2 className="text-sm font-semibold">Import / Export</h2>
-                <form className="grid gap-2" onSubmit={handleExportVault}>
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                    <input
-                      className="min-w-0 rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                      value={exportPath}
-                      onChange={(event) => setExportPath(event.currentTarget.value)}
-                      placeholder="Export path"
-                    />
-                    <button
-                      type="button"
-                      className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
-                      onClick={chooseExportPath}
-                    >
-                      Browse
-                    </button>
-                  </div>
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={exportPassword}
-                    onChange={(event) => setExportPassword(event.currentTarget.value)}
-                    placeholder="Export password"
-                    type="password"
-                  />
-                  <button
-                    type="submit"
-                    className="h-9 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
-                    disabled={!activeVault || !exportPath || isBusy}
-                  >
-                    Export
-                  </button>
-                </form>
-                <form className="grid gap-2" onSubmit={handleImportVault}>
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                    <input
-                      className="min-w-0 rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                      value={importPath}
-                      onChange={(event) => setImportPath(event.currentTarget.value)}
-                      placeholder="Import path"
-                    />
-                    <button
-                      type="button"
-                      className="h-9 rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442]"
-                      onClick={chooseImportPath}
-                    >
-                      Browse
-                    </button>
-                  </div>
-                  <input
-                    className="rounded-md border border-[#334353] bg-[#10161d] px-3 py-2 text-sm outline-none focus:border-[#55c2a2]"
-                    value={importPassword}
-                    onChange={(event) => setImportPassword(event.currentTarget.value)}
-                    placeholder="Import password"
-                    type="password"
-                  />
-                  <button
-                    type="submit"
-                    className="h-9 justify-self-start rounded-md border border-[#334353] bg-[#1d2731] px-3 text-sm hover:bg-[#263442] disabled:opacity-50"
-                    disabled={!importPath || isBusy}
-                  >
-                    Import
-                  </button>
-                </form>
-              </section>
-            </div>
-          </aside>
-        </section>
-
-        <footer className="flex min-w-0 items-center gap-[18px] overflow-hidden border-t border-[#25313c] bg-[#151b22] px-2.5 text-xs whitespace-nowrap text-[#8fa1b2]">
-          <span>{isBusy ? "Working..." : status}</span>
-          <span>{profiles.length} profiles</span>
-          <span>{credentials.length} credentials</span>
-          <span>Alt+Shift+D split</span>
-          <span>Alt+Shift++ vertical</span>
-          <span>Alt+Shift+- horizontal</span>
-        </footer>
-      </section>
+      {profileDrawerOpen ? (
+        <ProfileDrawer
+          editing={Boolean(editingProfileId)}
+          error={profileDrawerError}
+          form={profileForm}
+          isBusy={isBusy}
+          onChange={setProfileForm}
+          onClose={() => setProfileDrawerOpen(false)}
+          onDelete={() => editingProfileId && handleDeleteProfile(editingProfileId)}
+          onSubmit={handleSaveProfile}
+        />
+      ) : null}
     </main>
   );
 }

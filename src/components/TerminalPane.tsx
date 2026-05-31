@@ -1,6 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import type { SshOutputEvent } from "../types";
@@ -148,10 +149,11 @@ export function TerminalPane({
         </span>
         <button
           type="button"
-          className="rounded px-1.5 text-[#ffb8c0] hover:bg-[#2a171b]"
+          className="grid size-6 place-items-center rounded text-[#ffb8c0] hover:bg-[#2a171b]"
           onClick={onClose}
+          aria-label={`Close ${pane.title}`}
         >
-          Close
+          <X size={14} />
         </button>
       </div>
       <div ref={hostRef} className="min-h-0 min-w-0 p-2" />
