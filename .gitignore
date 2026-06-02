@@ -28,4 +28,4 @@ tmp/
 
 # agent
 .planning/
-
+.playwright-mcp/
