@@ -12,6 +12,7 @@ import {
 import { AppHeader } from "./components/AppHeader";
 import { AppSidebar } from "./components/AppSidebar";
 import { ProfileDrawer } from "./components/ProfileDrawer";
+import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import { ThemeEditorModal } from "./components/ThemeEditorModal";
 import { SessionPage } from "./pages/SessionPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -76,6 +77,7 @@ function App() {
   );
   const [terminalThemeError, setTerminalThemeError] = useState("");
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -167,6 +169,13 @@ function App() {
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
+      if (event.key === "F1" || event.code === "F1") {
+        event.preventDefault();
+        event.stopPropagation();
+        setShortcutHelpOpen(true);
+        return;
+      }
+
       if (!event.altKey || !event.shiftKey || !activeTab || activePage !== "session") {
         return;
       }
@@ -859,6 +868,10 @@ function App() {
           onClose={() => setThemeEditorOpen(false)}
           onSave={handleCreateTerminalTheme}
         />
+      ) : null}
+
+      {shortcutHelpOpen ? (
+        <ShortcutHelpModal onClose={() => setShortcutHelpOpen(false)} />
       ) : null}
     </main>
   );

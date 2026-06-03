@@ -9,8 +9,8 @@ import {
   Panel,
   PathField,
   ReadOnlyValue,
-  ShortcutRow,
 } from "../components/ui";
+import { ShortcutTable } from "../components/ShortcutTable";
 import type { TerminalThemeConfig } from "../terminalThemes";
 import type { Vault } from "../types";
 
@@ -123,9 +123,7 @@ export function SettingsPage({
           </>
         ) : activeSection === "shortcuts" ? (
           <Panel title="Shortcuts">
-            <ShortcutRow keys="Alt+Shift+D" label="Auto split" />
-            <ShortcutRow keys="Alt+Shift++" label="Vertical split" />
-            <ShortcutRow keys="Alt+Shift+-" label="Horizontal split" />
+            <ShortcutTable />
           </Panel>
         ) : activeSection === "preferences" ? (
           <>
