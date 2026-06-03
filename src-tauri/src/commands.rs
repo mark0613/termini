@@ -72,6 +72,14 @@ pub fn delete_credential(state: State<'_, AppState>, id: String) -> Result<(), S
 }
 
 #[tauri::command]
+pub fn reveal_credential_password(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<String, String> {
+    command_result(state.storage.get_password(&id))
+}
+
+#[tauri::command]
 pub fn list_profiles(
     state: State<'_, AppState>,
     vault_id: String,

@@ -32,6 +32,7 @@ pub fn run() {
             commands::create_credential,
             commands::update_credential,
             commands::delete_credential,
+            commands::reveal_credential_password,
             commands::list_profiles,
             commands::create_profile,
             commands::update_profile,

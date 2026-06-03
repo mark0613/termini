@@ -57,6 +57,8 @@ function App() {
   const [editingProfileId, setEditingProfileId] = useState("");
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false);
   const [profileDrawerError, setProfileDrawerError] = useState("");
+  const [profilePasswordVisible, setProfilePasswordVisible] = useState(false);
+  const [profilePasswordLoading, setProfilePasswordLoading] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [hostSearch, setHostSearch] = useState("");
   const [exportPath, setExportPath] = useState("");
@@ -392,14 +394,66 @@ function App() {
     setEditingProfileId("");
     setProfileForm(emptyProfileForm);
     setProfileDrawerError("");
+    setProfilePasswordVisible(false);
+    setProfilePasswordLoading(false);
     setProfileDrawerOpen(true);
   }
 
   function openEditProfileDrawer(profile: SshProfile) {
+    const form = toProfileForm(profile);
+    const shouldLoadPassword = Boolean(form.credentialId);
     setEditingProfileId(profile.id);
-    setProfileForm(toProfileForm(profile));
+    setProfileForm(form);
     setProfileDrawerError("");
+    setProfilePasswordVisible(false);
+    setProfilePasswordLoading(shouldLoadPassword);
     setProfileDrawerOpen(true);
+    if (shouldLoadPassword) {
+      void loadProfilePassword(form.credentialId, false);
+    }
+  }
+
+  function closeProfileDrawer() {
+    setProfileDrawerOpen(false);
+    setEditingProfileId("");
+    setProfileForm(emptyProfileForm);
+    setProfileDrawerError("");
+    setProfilePasswordVisible(false);
+    setProfilePasswordLoading(false);
+  }
+
+  async function toggleProfilePasswordVisibility() {
+    if (profilePasswordVisible) {
+      setProfilePasswordVisible(false);
+      return;
+    }
+
+    setProfileDrawerError("");
+    if (profileForm.password || !editingProfileId || !profileForm.credentialId) {
+      setProfilePasswordVisible(true);
+      return;
+    }
+
+    await loadProfilePassword(profileForm.credentialId, true);
+  }
+
+  async function loadProfilePassword(credentialId: string, reveal: boolean) {
+    setProfilePasswordLoading(true);
+    try {
+      const password = await api.revealCredentialPassword(credentialId);
+      setProfileForm((current) =>
+        current.credentialId === credentialId && !current.password
+          ? { ...current, password }
+          : current,
+      );
+      if (reveal) {
+        setProfilePasswordVisible(true);
+      }
+    } catch (err) {
+      setProfileDrawerError(getErrorMessage(err));
+    } finally {
+      setProfilePasswordLoading(false);
+    }
   }
 
   async function handleSaveProfile(event: FormEvent) {
@@ -473,6 +527,8 @@ function App() {
       setProfileForm(emptyProfileForm);
       setEditingProfileId("");
       setProfileDrawerOpen(false);
+      setProfilePasswordVisible(false);
+      setProfilePasswordLoading(false);
       await refreshVaultData(activeVault.id);
     } catch (err) {
       setProfileDrawerError(err instanceof Error ? err.message : String(err));
@@ -492,7 +548,7 @@ function App() {
 
     await runAction(async () => {
       await api.deleteProfile(id);
-      setProfileDrawerOpen(false);
+      closeProfileDrawer();
       setSelectedProfileId("");
       await refreshVaultData(activeVault.id);
     });
@@ -781,9 +837,14 @@ function App() {
           error={profileDrawerError}
           form={profileForm}
           isBusy={isBusy}
+          passwordLoading={profilePasswordLoading}
+          passwordVisible={profilePasswordVisible}
           onChange={setProfileForm}
-          onClose={() => setProfileDrawerOpen(false)}
+          onClose={closeProfileDrawer}
           onDelete={() => editingProfileId && handleDeleteProfile(editingProfileId)}
+          onTogglePasswordVisibility={() => {
+            void toggleProfilePasswordVisibility();
+          }}
           onSubmit={handleSaveProfile}
         />
       ) : null}

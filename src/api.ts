@@ -50,6 +50,10 @@ export function deleteCredential(id: string) {
   return invoke<void>("delete_credential", { id });
 }
 
+export function revealCredentialPassword(id: string) {
+  return invoke<string>("reveal_credential_password", { id });
+}
+
 export function listProfiles(vaultId: string) {
   return invoke<SshProfile[]>("list_profiles", { vaultId });
 }
