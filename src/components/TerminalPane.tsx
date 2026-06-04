@@ -22,6 +22,7 @@ interface TerminalPaneProps {
   pane: TerminalPaneState;
   active: boolean;
   terminalTheme?: TerminalThemeConfig;
+  terminalFontSize: number;
   onFocus: () => void;
   onReady: (cols: number, rows: number) => void;
   onClose: () => void;
@@ -31,6 +32,7 @@ export function TerminalPane({
   pane,
   active,
   terminalTheme,
+  terminalFontSize,
   onFocus,
   onReady,
   onClose,
@@ -107,7 +109,7 @@ export function TerminalPane({
       convertEol: true,
       fontFamily:
         "Cascadia Mono, JetBrains Mono, Consolas, ui-monospace, monospace",
-      fontSize: 13,
+      fontSize: terminalFontSize,
       theme: {
         ...xtermTheme,
       },
@@ -179,6 +181,19 @@ export function TerminalPane({
       fitAddonRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+
+    terminal.options.fontSize = terminalFontSize;
+    fitAddonRef.current?.fit();
+    const next = fitAddonRef.current?.proposeDimensions();
+    if (next) {
+      lastDimensionsRef.current = { cols: next.cols, rows: next.rows };
+      resizeBackend();
+    }
+  }, [terminalFontSize]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

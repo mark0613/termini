@@ -40,6 +40,9 @@ import {
 import type { Credential, SshProfile, SshStatusEvent, Vault } from "./types";
 
 const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
+const defaultTerminalFontSize = 13;
+const minTerminalFontSize = 9;
+const maxTerminalFontSize = 24;
 
 function getErrorMessage(err: unknown) {
   return err instanceof Error ? err.message : String(err);
@@ -78,6 +81,9 @@ function App() {
   const [terminalThemeError, setTerminalThemeError] = useState("");
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const [terminalFontSize, setTerminalFontSize] = useState(
+    defaultTerminalFontSize,
+  );
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -174,6 +180,31 @@ function App() {
         event.stopPropagation();
         setShortcutHelpOpen(true);
         return;
+      }
+
+      if (event.ctrlKey && !event.altKey && activePage === "session") {
+        if (event.key === "+" || event.key === "=" || event.code === "NumpadAdd") {
+          event.preventDefault();
+          event.stopPropagation();
+          setTerminalFontSize((current) =>
+            Math.min(maxTerminalFontSize, current + 1),
+          );
+          return;
+        }
+
+        if (
+          event.key === "-" ||
+          event.key === "_" ||
+          event.code === "Minus" ||
+          event.code === "NumpadSubtract"
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          setTerminalFontSize((current) =>
+            Math.max(minTerminalFontSize, current - 1),
+          );
+          return;
+        }
       }
 
       if (!event.altKey || !event.shiftKey || !activeTab || activePage !== "session") {
@@ -786,6 +817,7 @@ function App() {
               importPassword={importPassword}
               importPath={importPath}
               isBusy={isBusy}
+              terminalFontSize={terminalFontSize}
               terminalThemeError={terminalThemeError}
               terminalThemes={terminalThemes}
               onActiveTerminalThemeChange={(id) => {
@@ -824,6 +856,7 @@ function App() {
         activeTabId={activeTabId}
         activeVault={activeVault}
         activeTheme={activeTerminalTheme}
+        terminalFontSize={terminalFontSize}
         themeReady={terminalThemesLoaded}
         profiles={profiles}
         tabs={tabs}

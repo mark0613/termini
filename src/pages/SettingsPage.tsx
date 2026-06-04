@@ -27,6 +27,7 @@ export function SettingsPage({
   importPassword,
   importPath,
   isBusy,
+  terminalFontSize,
   terminalThemeError,
   terminalThemes,
   onActiveTerminalThemeChange,
@@ -51,6 +52,7 @@ export function SettingsPage({
   importPassword: string;
   importPath: string;
   isBusy: boolean;
+  terminalFontSize: number;
   terminalThemeError: string;
   terminalThemes: TerminalThemeConfig[];
   onActiveTerminalThemeChange: (id: string) => void;
@@ -128,7 +130,7 @@ export function SettingsPage({
         ) : activeSection === "preferences" ? (
           <>
             <Panel title="Terminal">
-              <ReadOnlyValue value="Cascadia Mono, 13px" />
+              <ReadOnlyValue value={`Cascadia Mono, ${terminalFontSize}px`} />
             </Panel>
 
             <Panel title="Theme">

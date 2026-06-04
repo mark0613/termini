@@ -8,6 +8,7 @@ export function SessionPage({
   activeTabId,
   activeVault,
   activeTheme,
+  terminalFontSize,
   themeReady,
   profiles,
   tabs,
@@ -20,6 +21,7 @@ export function SessionPage({
   activeTabId: string;
   activeVault: Vault | null;
   activeTheme: TerminalThemeConfig;
+  terminalFontSize: number;
   themeReady: boolean;
   profiles: SshProfile[];
   tabs: TerminalTab[];
@@ -58,6 +60,7 @@ export function SessionPage({
                 <SplitWorkspace
                   activePaneId={tab.activePaneId}
                   activeTheme={activeTheme}
+                  terminalFontSize={terminalFontSize}
                   node={tab.root}
                   onClosePane={onClosePane}
                   onFocusPane={(paneId) => onFocusPane(tab.id, paneId)}

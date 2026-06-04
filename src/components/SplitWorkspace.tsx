@@ -7,6 +7,7 @@ interface SplitWorkspaceProps {
   node: WorkspaceNode;
   activePaneId: string;
   activeTheme: TerminalThemeConfig;
+  terminalFontSize: number;
   onFocusPane: (paneId: string) => void;
   onPaneReady: (paneId: string, cols: number, rows: number) => void;
   onClosePane: (paneId: string) => void;
@@ -16,6 +17,7 @@ export function SplitWorkspace({
   node,
   activePaneId,
   activeTheme,
+  terminalFontSize,
   onFocusPane,
   onPaneReady,
   onClosePane,
@@ -34,6 +36,7 @@ export function SplitWorkspace({
             pane={pane}
             active={pane.id === activePaneId}
             terminalTheme={activeTheme}
+            terminalFontSize={terminalFontSize}
             onFocus={() => onFocusPane(pane.id)}
             onReady={(cols, rows) => onPaneReady(pane.id, cols, rows)}
             onClose={() => onClosePane(pane.id)}
