@@ -2,13 +2,21 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
+  KeyRound,
   Plug,
   Rocket,
   Server,
   Terminal as TerminalIcon,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from "react";
 import * as api from "../api";
 import {
   DEFAULT_TERMINAL_THEME,
@@ -17,6 +25,9 @@ import {
 } from "../terminalThemes";
 import type { SshOutputEvent } from "../types";
 import type { TerminalPaneState } from "../terminalTree";
+
+const passwordPromptPopoverWidth = 176;
+const passwordPromptPopoverHeight = 34;
 
 interface TerminalPaneProps {
   pane: TerminalPaneState;
@@ -37,6 +48,7 @@ export function TerminalPane({
   onReady,
   onClose,
 }: TerminalPaneProps) {
+  const paneRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -47,7 +59,12 @@ export function TerminalPane({
   const lastNoticeRef = useRef("");
   const overlayStartedRef = useRef(false);
   const overlayTimersRef = useRef<number[]>([]);
+  const promptVisibleRef = useRef(false);
+  const promptSendingRef = useRef(false);
   const [promptVisible, setPromptVisible] = useState(false);
+  const [promptSending, setPromptSending] = useState(false);
+  const [promptError, setPromptError] = useState("");
+  const [promptAnchor, setPromptAnchor] = useState<PromptAnchor | null>(null);
   const [overlayVisible, setOverlayVisible] = useState(
     pane.status === "pending" || pane.status === "connecting",
   );
@@ -67,6 +84,14 @@ export function TerminalPane({
   useEffect(() => {
     return () => clearOverlayTimers();
   }, []);
+
+  useEffect(() => {
+    promptVisibleRef.current = promptVisible;
+  }, [promptVisible]);
+
+  useEffect(() => {
+    promptSendingRef.current = promptSending;
+  }, [promptSending]);
 
   useEffect(() => {
     if (connecting) {
@@ -121,7 +146,7 @@ export function TerminalPane({
     fitAddon.fit();
 
     terminal.onData((data) => {
-      setPromptVisible(false);
+      hidePasswordPrompt();
       const sessionId = sessionIdRef.current;
       if (connectedRef.current && sessionId) {
         void api.writeSsh({ sessionId, data }).catch(() => {});
@@ -132,12 +157,12 @@ export function TerminalPane({
       if (
         event.type === "keydown" &&
         event.key === "Tab" &&
-        promptVisible &&
+        promptVisibleRef.current &&
+        !promptSendingRef.current &&
         connectedRef.current &&
         sessionId
       ) {
-        void api.sendProfilePassword(sessionId).catch(() => {});
-        setPromptVisible(false);
+        void sendSavedPassword();
         return false;
       }
       return true;
@@ -160,6 +185,9 @@ export function TerminalPane({
         lastDimensionsRef.current = { cols: next.cols, rows: next.rows };
         resizeBackend();
       }
+      if (promptVisibleRef.current) {
+        updatePasswordPromptAnchor();
+      }
     });
     observer.observe(hostRef.current);
 
@@ -167,8 +195,9 @@ export function TerminalPane({
     void listen<SshOutputEvent>("ssh-output", (event) => {
       const sessionId = sessionIdRef.current;
       if (event.payload.sessionId !== sessionId) return;
-      terminal.write(event.payload.data);
-      recordOutputTail(event.payload.data);
+      terminal.write(event.payload.data, () => {
+        recordOutputTail(event.payload.data);
+      });
     }).then((handler) => {
       unlisten = handler;
     });
@@ -193,6 +222,9 @@ export function TerminalPane({
       lastDimensionsRef.current = { cols: next.cols, rows: next.rows };
       resizeBackend();
     }
+    if (promptVisibleRef.current) {
+      updatePasswordPromptAnchor();
+    }
   }, [terminalFontSize]);
 
   useEffect(() => {
@@ -201,6 +233,9 @@ export function TerminalPane({
 
     applyTerminalTheme(terminal, xtermTheme);
     fitAddonRef.current?.fit();
+    if (promptVisibleRef.current) {
+      updatePasswordPromptAnchor();
+    }
   }, [xtermTheme]);
 
   useEffect(() => {
@@ -260,8 +295,78 @@ export function TerminalPane({
   function recordOutputTail(data: string) {
     tailRef.current = stripAnsi(`${tailRef.current}${data}`).slice(-500);
     if (hasPasswordPrompt(tailRef.current)) {
+      setPromptError("");
+      promptVisibleRef.current = true;
       setPromptVisible(true);
+      schedulePasswordPromptAnchorUpdate();
     }
+  }
+
+  function hidePasswordPrompt() {
+    promptVisibleRef.current = false;
+    setPromptVisible(false);
+    setPromptError("");
+    setPromptAnchor(null);
+  }
+
+  function schedulePasswordPromptAnchorUpdate() {
+    window.requestAnimationFrame(updatePasswordPromptAnchor);
+  }
+
+  function updatePasswordPromptAnchor() {
+    const terminal = terminalRef.current;
+    const paneElement = paneRef.current;
+    const terminalElement = terminal?.element;
+    if (!terminal || !paneElement || !terminalElement) return;
+
+    const rowsElement =
+      terminalElement.querySelector<HTMLElement>(".xterm-rows") ?? terminalElement;
+    const paneRect = paneElement.getBoundingClientRect();
+    const rowsRect = rowsElement.getBoundingClientRect();
+    const cellWidth = rowsRect.width / Math.max(terminal.cols, 1);
+    const cellHeight = rowsRect.height / Math.max(terminal.rows, 1);
+    const rawLeft =
+      rowsRect.left -
+      paneRect.left +
+      terminal.buffer.active.cursorX * cellWidth +
+      14;
+    const rawTop =
+      rowsRect.top -
+      paneRect.top +
+      terminal.buffer.active.cursorY * cellHeight +
+      4;
+    const maxLeft = Math.max(8, paneRect.width - passwordPromptPopoverWidth - 8);
+    const maxTop = Math.max(34, paneRect.height - passwordPromptPopoverHeight - 8);
+
+    setPromptAnchor({
+      left: Math.max(8, Math.min(rawLeft, maxLeft)),
+      top: Math.max(34, Math.min(rawTop, maxTop)),
+    });
+  }
+
+  async function sendSavedPassword() {
+    const sessionId = sessionIdRef.current;
+    if (!connectedRef.current || !sessionId || promptSendingRef.current) return;
+
+    setPromptError("");
+    promptSendingRef.current = true;
+    setPromptSending(true);
+    try {
+      await api.sendProfilePassword(sessionId);
+      tailRef.current = "";
+      hidePasswordPrompt();
+    } catch (err) {
+      setPromptError(err instanceof Error ? err.message : String(err));
+    } finally {
+      promptSendingRef.current = false;
+      setPromptSending(false);
+      terminalRef.current?.focus();
+    }
+  }
+
+  function dismissPasswordPrompt() {
+    hidePasswordPrompt();
+    terminalRef.current?.focus();
   }
 
   function scheduleOverlayRun() {
@@ -287,6 +392,7 @@ export function TerminalPane({
 
   return (
     <div
+      ref={paneRef}
       className={paneFrameClass}
       style={{ background: terminalBackground }}
       onMouseDown={onFocus}
@@ -319,9 +425,15 @@ export function TerminalPane({
         <ConnectingOverlay pane={pane} activeStep={overlayStep} onClose={onClose} />
       ) : null}
       {promptVisible ? (
-        <div className="absolute right-4 bottom-4 rounded-md border border-[#55c2a2] bg-[#142820] px-3 py-2 text-xs text-[#d9e3ec] shadow-lg">
-          Press Tab to send saved password
-        </div>
+        <PasswordPromptPopover
+          anchor={promptAnchor}
+          error={promptError}
+          sending={promptSending}
+          onDismiss={dismissPasswordPrompt}
+          onSend={() => {
+            void sendSavedPassword();
+          }}
+        />
       ) : null}
       {pane.message && !showConnectionOverlay ? (
         <div className="absolute left-4 bottom-4 max-w-[70%] rounded-md border border-[#334353] bg-[#151b22] px-3 py-2 text-xs text-[#8fa1b2]">
@@ -330,6 +442,81 @@ export function TerminalPane({
       ) : null}
     </div>
   );
+}
+
+function PasswordPromptPopover({
+  anchor,
+  error,
+  sending,
+  onDismiss,
+  onSend,
+}: {
+  anchor: PromptAnchor | null;
+  error: string;
+  sending: boolean;
+  onDismiss: () => void;
+  onSend: () => void;
+}) {
+  const positionStyle: CSSProperties = anchor
+    ? { left: anchor.left, top: anchor.top }
+    : { right: "1rem", bottom: "1rem" };
+
+  function handleItemClick() {
+    if (!sending) onSend();
+  }
+
+  function handleItemKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (sending || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    onSend();
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label="Send saved password"
+      className="absolute z-30 grid w-[176px] cursor-pointer gap-1 rounded-md border border-[#55c2a2] bg-[#142820] p-1 text-xs text-[#d9e3ec] shadow-2xl outline-none hover:bg-[#18372d] focus:border-[#74e0bd]"
+      style={positionStyle}
+      onClick={handleItemClick}
+      onKeyDown={handleItemKeyDown}
+    >
+      <div className="flex min-w-0 items-center gap-1">
+        <span className="grid size-5 shrink-0 place-items-center text-[#74e0bd]">
+          <KeyRound size={13} />
+        </span>
+        <span className="min-w-0 flex-1 rounded px-1.5 py-1 font-mono text-[12px] font-semibold text-white">
+          {sending ? "Sending..." : "******"}
+        </span>
+        <span className="rounded border border-[#3a4058] bg-[#1c2134] px-1 py-0.5 font-mono text-[10px] text-[#9ca4bf]">
+          Tab
+        </span>
+        <button
+          type="button"
+          className="grid size-5 shrink-0 place-items-center rounded text-[#aeb7ca] hover:bg-[#203b32] hover:text-white"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDismiss();
+          }}
+          aria-label="Dismiss password prompt"
+          title="Dismiss"
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      {error ? (
+        <div className="rounded border border-[#7f3333] bg-[#321b1b] px-2 py-1 text-[11px] text-[#ffc9c9]">
+          {error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface PromptAnchor {
+  left: number;
+  top: number;
 }
 
 function ConnectingOverlay({

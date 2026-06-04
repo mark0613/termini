@@ -1,6 +1,7 @@
 import { ShortcutRow } from "./ui";
 
 const shortcuts = [
+  { keys: "Tab", label: "Send saved password when prompted" },
   { keys: "Ctrl+Shift+W", label: "Close active terminal" },
   { keys: "Ctrl++", label: "Terminal zoom in" },
   { keys: "Ctrl+-", label: "Terminal zoom out" },
