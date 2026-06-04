@@ -182,6 +182,21 @@ function App() {
         return;
       }
 
+      if (
+        event.ctrlKey &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "w" &&
+        activePage === "session" &&
+        activeTab &&
+        !shortcutHelpOpen
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        closePane(activeTab.activePaneId);
+        return;
+      }
+
       if (event.ctrlKey && !event.altKey && activePage === "session") {
         if (event.key === "+" || event.key === "=" || event.code === "NumpadAdd") {
           event.preventDefault();
@@ -242,7 +257,7 @@ function App() {
 
     window.addEventListener("keydown", handleShortcut, true);
     return () => window.removeEventListener("keydown", handleShortcut, true);
-  }, [activePage, activeTabId, activeTab?.activePaneId]);
+  }, [activePage, activeTabId, activeTab?.activePaneId, shortcutHelpOpen]);
 
   async function runAction(action: () => Promise<void>) {
     setIsBusy(true);
