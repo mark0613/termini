@@ -17,6 +17,7 @@ export function SessionPage({
   onConnect,
   onFocusPane,
   onPaneReady,
+  onReconnectPane,
 }: {
   activeTabId: string;
   activeVault: Vault | null;
@@ -30,6 +31,7 @@ export function SessionPage({
   onConnect: (profile: SshProfile) => void;
   onFocusPane: (tabId: string, paneId: string) => void;
   onPaneReady: (paneId: string, cols: number, rows: number) => void;
+  onReconnectPane: (paneId: string, cols: number, rows: number) => void;
 }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const emptyTab = activeTab
@@ -65,6 +67,7 @@ export function SessionPage({
                   onClosePane={onClosePane}
                   onFocusPane={(paneId) => onFocusPane(tab.id, paneId)}
                   onPaneReady={onPaneReady}
+                  onReconnectPane={onReconnectPane}
                 />
               </div>
             );

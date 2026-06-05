@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   KeyRound,
   Plug,
+  RefreshCw,
   Rocket,
   Server,
   Terminal as TerminalIcon,
@@ -36,6 +37,7 @@ interface TerminalPaneProps {
   terminalFontSize: number;
   onFocus: () => void;
   onReady: (cols: number, rows: number) => void;
+  onReconnect: (cols: number, rows: number) => void;
   onClose: () => void;
 }
 
@@ -46,6 +48,7 @@ export function TerminalPane({
   terminalFontSize,
   onFocus,
   onReady,
+  onReconnect,
   onClose,
 }: TerminalPaneProps) {
   const paneRef = useRef<HTMLDivElement | null>(null);
@@ -73,7 +76,12 @@ export function TerminalPane({
   const xtermTheme = useMemo(() => toXtermTheme(effectiveTheme), [effectiveTheme]);
   const terminalBackground = effectiveTheme.colors.background;
   const connecting = pane.status === "pending" || pane.status === "connecting";
+  const recoverableConnectionStatus =
+    pane.status === "error" ||
+    pane.status === "disconnected" ||
+    pane.status === "exited";
   const showConnectionOverlay = connecting || overlayVisible;
+  const showRecoveryOverlay = !showConnectionOverlay && recoverableConnectionStatus;
 
   useEffect(() => {
     sessionIdRef.current = pane.sessionId;
@@ -92,6 +100,12 @@ export function TerminalPane({
   useEffect(() => {
     promptSendingRef.current = promptSending;
   }, [promptSending]);
+
+  useEffect(() => {
+    if (pane.status !== "connected") {
+      hidePasswordPrompt();
+    }
+  }, [pane.status]);
 
   useEffect(() => {
     if (connecting) {
@@ -376,6 +390,15 @@ export function TerminalPane({
     terminalRef.current?.focus();
   }
 
+  function requestReconnect() {
+    hidePasswordPrompt();
+    const dimensions = lastDimensionsRef.current ?? {
+      cols: terminalRef.current?.cols ?? 80,
+      rows: terminalRef.current?.rows ?? 24,
+    };
+    onReconnect(dimensions.cols, dimensions.rows);
+  }
+
   function scheduleOverlayRun() {
     clearOverlayTimers();
     overlayTimersRef.current = [
@@ -416,6 +439,13 @@ export function TerminalPane({
       {showConnectionOverlay ? (
         <ConnectingOverlay pane={pane} activeStep={overlayStep} onClose={onClose} />
       ) : null}
+      {showRecoveryOverlay ? (
+        <ConnectionRecoveryOverlay
+          pane={pane}
+          onReconnect={requestReconnect}
+          onClose={onClose}
+        />
+      ) : null}
       {promptVisible ? (
         <PasswordPromptPopover
           anchor={promptAnchor}
@@ -427,11 +457,76 @@ export function TerminalPane({
           }}
         />
       ) : null}
-      {pane.message && !showConnectionOverlay ? (
+      {pane.message && !showConnectionOverlay && !showRecoveryOverlay ? (
         <div className="absolute left-4 bottom-4 max-w-[70%] rounded-md border border-[#334353] bg-[#151b22] px-3 py-2 text-xs text-[#8fa1b2]">
           {pane.message}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ConnectionRecoveryOverlay({
+  pane,
+  onReconnect,
+  onClose,
+}: {
+  pane: TerminalPaneState;
+  onReconnect: () => void;
+  onClose: () => void;
+}) {
+  const title =
+    pane.status === "error"
+      ? "Connection failed"
+      : pane.status === "exited"
+        ? "Session ended"
+        : "Connection lost";
+  const message =
+    pane.message ??
+    (pane.status === "exited"
+      ? "Remote shell exited."
+      : "SSH session disconnected.");
+
+  return (
+    <div className="absolute inset-0 z-40 grid place-items-center bg-[#070a10]/88 px-6 text-[#f4f6fb] backdrop-blur-[2px]">
+      <div className="grid w-full max-w-[520px] gap-6">
+        <div className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-4">
+          <span className="grid size-[50px] place-items-center rounded-xl bg-[#7c5268] text-white">
+            <Server size={22} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-base font-bold text-white">{pane.title}</div>
+            <div className="truncate text-sm text-[#9ca4bf]">
+              SSH {pane.endpoint ?? "remote shell"}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#2b3044] px-3 text-sm font-bold text-white hover:bg-[#343b55]"
+            onClick={onClose}
+            aria-label="Close terminal pane"
+          >
+            <X size={15} />
+            <span>Close</span>
+          </button>
+        </div>
+
+        <div className="grid gap-2">
+          <div className="text-sm font-semibold text-[#dce3ef]">{title}</div>
+          <div className="text-xs text-[#9ca4bf]">{message}</div>
+        </div>
+
+        <div>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#1e9bff] px-4 text-sm font-bold text-white shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-[#3aa8ff]"
+            onClick={onReconnect}
+          >
+            <RefreshCw size={16} />
+            <span>重新連線</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

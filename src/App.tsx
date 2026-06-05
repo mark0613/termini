@@ -321,6 +321,15 @@ function App() {
     );
   }
 
+  function findPaneInOpenTabs(paneId: string) {
+    for (const tab of tabs) {
+      const pane = findPane(tab.root, paneId);
+      if (pane) return pane;
+    }
+
+    return null;
+  }
+
   function connectProfile(profile: SshProfile) {
     const tab = createTab(profile);
     setTabs((current) => [...current, tab]);
@@ -329,13 +338,27 @@ function App() {
   }
 
   async function handlePaneReady(paneId: string, cols: number, rows: number) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.profileId || pane.sessionId || pane.status !== "pending") return;
+
+    await connectPane(paneId, cols, rows);
+  }
+
+  async function reconnectPane(paneId: string, cols: number, rows: number) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.profileId || !isRecoverableSshStatus(pane.status)) return;
+
+    await connectPane(paneId, cols, rows);
+  }
+
+  async function connectPane(paneId: string, cols: number, rows: number) {
     if (connectingPaneIdsRef.current.has(paneId)) return;
 
-    const tab = tabs.find((item) => findPane(item.root, paneId));
-    const pane = tab ? findPane(tab.root, paneId) : null;
-    if (!pane?.profileId || pane.sessionId || pane.status !== "pending") return;
-    connectingPaneIdsRef.current.add(paneId);
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.profileId) return;
 
+    connectingPaneIdsRef.current.add(paneId);
+    const previousSessionId = pane.sessionId;
     const sessionId = crypto.randomUUID();
     updatePaneInTabs(paneId, (current) => ({
       ...current,
@@ -343,6 +366,10 @@ function App() {
       status: "connecting",
       message: "Connecting...",
     }));
+
+    if (previousSessionId) {
+      void api.disconnectSsh(previousSessionId).catch(() => {});
+    }
 
     try {
       const session = await api.connectSsh({
@@ -360,9 +387,12 @@ function App() {
     } catch (err) {
       updatePaneInTabs(paneId, (current) => ({
         ...current,
+        sessionId,
         status: "error",
-        message: err instanceof Error ? err.message : String(err),
+        message: getErrorMessage(err),
       }));
+    } finally {
+      connectingPaneIdsRef.current.delete(paneId);
     }
   }
 
@@ -886,6 +916,9 @@ function App() {
           )
         }
         onPaneReady={handlePaneReady}
+        onReconnectPane={(paneId, cols, rows) => {
+          void reconnectPane(paneId, cols, rows);
+        }}
       />
 
       {profileDrawerOpen ? (
@@ -923,6 +956,10 @@ function App() {
       ) : null}
     </main>
   );
+}
+
+function isRecoverableSshStatus(status: string) {
+  return status === "error" || status === "disconnected" || status === "exited";
 }
 
 export default App;

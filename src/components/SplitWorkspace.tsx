@@ -10,6 +10,7 @@ interface SplitWorkspaceProps {
   terminalFontSize: number;
   onFocusPane: (paneId: string) => void;
   onPaneReady: (paneId: string, cols: number, rows: number) => void;
+  onReconnectPane: (paneId: string, cols: number, rows: number) => void;
   onClosePane: (paneId: string) => void;
 }
 
@@ -20,6 +21,7 @@ export function SplitWorkspace({
   terminalFontSize,
   onFocusPane,
   onPaneReady,
+  onReconnectPane,
   onClosePane,
 }: SplitWorkspaceProps) {
   const paneLayouts = collectPaneLayouts(node);
@@ -39,6 +41,7 @@ export function SplitWorkspace({
             terminalFontSize={terminalFontSize}
             onFocus={() => onFocusPane(pane.id)}
             onReady={(cols, rows) => onPaneReady(pane.id, cols, rows)}
+            onReconnect={(cols, rows) => onReconnectPane(pane.id, cols, rows)}
             onClose={() => onClosePane(pane.id)}
           />
         </div>
