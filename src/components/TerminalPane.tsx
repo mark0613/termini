@@ -153,6 +153,13 @@ export function TerminalPane({
       }
     });
     terminal.attachCustomKeyEventHandler((event) => {
+      if (isTerminalCopyShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        copyTerminalSelection(terminal);
+        return false;
+      }
+
       const sessionId = sessionIdRef.current;
       if (
         event.type === "keydown" &&
@@ -634,4 +641,42 @@ function applyTerminalTheme(
   }
 
   terminal.refresh(0, Math.max(0, terminal.rows - 1));
+}
+
+function isTerminalCopyShortcut(event: globalThis.KeyboardEvent) {
+  return (
+    event.type === "keydown" &&
+    event.ctrlKey &&
+    event.shiftKey &&
+    !event.altKey &&
+    event.key.toLowerCase() === "c"
+  );
+}
+
+function copyTerminalSelection(terminal: Terminal) {
+  const selectedText = terminal.getSelection();
+  if (!selectedText) return;
+
+  void writeClipboardText(selectedText);
+}
+
+async function writeClipboardText(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the legacy clipboard path for WebViews without Clipboard API access.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
