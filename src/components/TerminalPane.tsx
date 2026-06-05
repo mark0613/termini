@@ -393,7 +393,7 @@ export function TerminalPane({
 
   const paneFrameClass = showConnectionOverlay
     ? "relative h-full min-h-0 min-w-0 bg-[#111426]"
-    : `relative grid h-full min-h-0 min-w-0 grid-rows-[30px_minmax(0,1fr)] border ${
+    : `relative h-full min-h-0 min-w-0 border ${
         active ? "border-[#55c2a2]" : "border-[#25313c]"
       } bg-[#0d1116]`;
 
@@ -404,28 +404,13 @@ export function TerminalPane({
       style={{ background: terminalBackground }}
       onMouseDown={onFocus}
     >
-      {!showConnectionOverlay ? (
-        <div className="flex min-w-0 items-center justify-between gap-2 border-b border-[#25313c] bg-[#151b22] px-2 text-xs text-[#8fa1b2]">
-          <span className="truncate">
-            {pane.title} · {pane.status}
-          </span>
-          <button
-            type="button"
-            className="grid size-6 place-items-center rounded text-[#ffb8c0] hover:bg-[#2a171b]"
-            onClick={onClose}
-            aria-label={`Close ${pane.title}`}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      ) : null}
       <div
         ref={hostRef}
         style={{ background: terminalBackground }}
         className={
           showConnectionOverlay
             ? "invisible absolute inset-0 min-h-0 min-w-0 p-2"
-            : "min-h-0 min-w-0 p-2"
+            : "h-full min-h-0 min-w-0 p-2"
         }
       />
       {showConnectionOverlay ? (
