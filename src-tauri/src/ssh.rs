@@ -55,7 +55,6 @@ impl SshManager {
         );
 
         let config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(30)),
             keepalive_interval: Some(Duration::from_secs(30)),
             ..<_>::default()
         };
