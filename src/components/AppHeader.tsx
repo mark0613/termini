@@ -1,6 +1,6 @@
 import { Database, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { AppPage } from "../appTypes";
 import type { TerminalTab } from "../terminalTree";
 
@@ -29,6 +29,10 @@ export function AppHeader({
   onTabDrop: (tabId: string, point: TabDragPoint) => void;
   onVaultsClick: () => void;
 }) {
+  const [dragVisual, setDragVisual] = useState<TabDragVisual | null>(null);
+  const draggedTabId = dragVisual?.tab.id ?? null;
+  const spacerWidth = dragVisual?.width ?? 128;
+
   async function handleHeaderMouseDown(event: React.MouseEvent<HTMLElement>) {
     if (event.button !== 0 || isWindowControlTarget(event.target)) {
       return;
@@ -58,20 +62,41 @@ export function AppHeader({
           <TabReorderSlot
             key={tab.id}
             active={reorderPreview?.targetIndex === index}
+            spacerWidth={spacerWidth}
           >
             <HostTabButton
               active={activePage === "session" && tab.id === activeTabId}
               canDrag={activePage === "session"}
+              dragging={tab.id === draggedTabId}
               tab={tab}
               onClose={() => onCloseTab(tab.id)}
-              onDragMove={(point) => onTabDragMove(tab.id, point)}
-              onDragStart={(point) => onTabDragStart(tab.id, point)}
-              onDrop={(point) => onTabDrop(tab.id, point)}
+              onDragMove={(point) => {
+                setDragVisual((current) =>
+                  current?.tab.id === tab.id ? { ...current, point } : current,
+                );
+                onTabDragMove(tab.id, point);
+              }}
+              onDragStart={(point, snapshot) => {
+                setDragVisual({
+                  ...snapshot,
+                  active: activePage === "session" && tab.id === activeTabId,
+                  point,
+                  tab,
+                });
+                onTabDragStart(tab.id, point);
+              }}
+              onDrop={(point) => {
+                setDragVisual(null);
+                onTabDrop(tab.id, point);
+              }}
               onSelect={() => onSelectTab(tab.id)}
             />
           </TabReorderSlot>
         ))}
-        <TabReorderSlot active={reorderPreview?.targetIndex === tabs.length} />
+        <TabReorderSlot
+          active={reorderPreview?.targetIndex === tabs.length}
+          spacerWidth={spacerWidth}
+        />
       </div>
 
       <div className="flex items-center text-[#8d93ad]">
@@ -89,6 +114,7 @@ export function AppHeader({
           <X size={17} />
         </WindowButton>
       </div>
+      {dragVisual ? <DraggedTabPreview visual={dragVisual} /> : null}
     </header>
   );
 }
@@ -123,16 +149,45 @@ function TopPageButton({
 function TabReorderSlot({
   active,
   children,
+  spacerWidth,
 }: {
   active: boolean;
   children?: React.ReactNode;
+  spacerWidth: number;
 }) {
   return (
-    <div className="relative h-8">
+    <div className="relative flex h-8 items-center gap-2">
       {active ? (
-        <span className="pointer-events-none absolute top-1 bottom-1 -left-1 z-50 w-0.5 rounded-full bg-[#55c2a2] shadow-[0_0_10px_rgba(85,194,162,0.5)]" />
+        <div
+          className="h-8 shrink-0 rounded-lg border border-dashed border-[#55c2a2] bg-[#55c2a2]/12 shadow-[inset_0_0_0_1px_rgba(85,194,162,0.12)]"
+          style={{ width: spacerWidth }}
+        />
       ) : null}
       {children}
+    </div>
+  );
+}
+
+function DraggedTabPreview({ visual }: { visual: TabDragVisual }) {
+  return (
+    <div
+      className={`pointer-events-none fixed z-[1000] flex h-8 items-center rounded-lg border text-[#f4f6fb] shadow-2xl ${
+        visual.active
+          ? "border-[#2b3044] bg-[#262b42]"
+          : "border-[#2b3044] bg-[#1c2134]"
+      }`}
+      style={{
+        left: visual.point.x - visual.offsetX,
+        top: visual.point.y - visual.offsetY,
+        width: visual.width,
+      }}
+    >
+      <span className="min-w-0 flex-1 px-3 text-left text-sm font-semibold">
+        <span className="block truncate">{visual.tab.title}</span>
+      </span>
+      <span className="grid size-8 shrink-0 place-items-center text-[#9ca4bf]">
+        <X size={14} />
+      </span>
     </div>
   );
 }
@@ -140,6 +195,7 @@ function TabReorderSlot({
 function HostTabButton({
   active,
   canDrag,
+  dragging,
   tab,
   onDragMove,
   onDragStart,
@@ -149,14 +205,16 @@ function HostTabButton({
 }: {
   active: boolean;
   canDrag: boolean;
+  dragging: boolean;
   tab: TerminalTab;
   onDragMove: (point: TabDragPoint) => void;
-  onDragStart: (point: TabDragPoint) => void;
+  onDragStart: (point: TabDragPoint, snapshot: TabDragSnapshot) => void;
   onDrop: (point: TabDragPoint) => void;
   onSelect: () => void;
   onClose: () => void;
 }) {
   const pointerStartRef = useRef<TabPointerStart | null>(null);
+  const tabRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   const suppressClickRef = useRef(false);
 
@@ -188,7 +246,7 @@ function HostTabButton({
     if (!draggingRef.current) {
       draggingRef.current = true;
       suppressClickRef.current = true;
-      onDragStart(point);
+      onDragStart(point, getTabDragSnapshot(tabRef.current, point));
     }
     onDragMove(point);
   }
@@ -239,12 +297,13 @@ function HostTabButton({
 
   return (
     <div
+      ref={tabRef}
       data-tab-reorder-tab-id={tab.id}
       className={`flex h-8 min-w-32 max-w-56 items-center rounded-lg border ${
         active
           ? "border-[#2b3044] bg-[#262b42] text-white"
           : "border-transparent bg-[#1c2134] text-[#d5daf0] hover:bg-[#262b42]"
-      }`}
+      } ${dragging ? "opacity-40" : ""}`}
     >
       <button
         type="button"
@@ -278,8 +337,36 @@ export interface TabReorderPreview {
   targetIndex: number;
 }
 
+interface TabDragVisual extends TabDragSnapshot {
+  active: boolean;
+  point: TabDragPoint;
+  tab: TerminalTab;
+}
+
+interface TabDragSnapshot {
+  offsetX: number;
+  offsetY: number;
+  width: number;
+}
+
 interface TabPointerStart extends TabDragPoint {
   pointerId: number;
+}
+
+function getTabDragSnapshot(
+  element: HTMLDivElement | null,
+  point: TabDragPoint,
+): TabDragSnapshot {
+  const rect = element?.getBoundingClientRect();
+  if (!rect) {
+    return { offsetX: 0, offsetY: 0, width: 128 };
+  }
+
+  return {
+    offsetX: point.x - rect.left,
+    offsetY: point.y - rect.top,
+    width: rect.width,
+  };
 }
 
 function toTabDragPoint(event: React.PointerEvent<HTMLButtonElement>): TabDragPoint {
