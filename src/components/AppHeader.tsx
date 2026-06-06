@@ -2,7 +2,7 @@ import { Database, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useRef } from "react";
 import type { AppPage } from "../appTypes";
-import { canDragTabIntoWorkspace, type TerminalTab } from "../terminalTree";
+import type { TerminalTab } from "../terminalTree";
 
 const appWindow = getCurrentWindow();
 
@@ -12,6 +12,7 @@ export function AppHeader({
   tabs,
   onCloseTab,
   onSelectTab,
+  reorderPreview,
   onTabDragMove,
   onTabDragStart,
   onTabDrop,
@@ -22,6 +23,7 @@ export function AppHeader({
   tabs: TerminalTab[];
   onCloseTab: (tabId: string) => void;
   onSelectTab: (tabId: string) => void;
+  reorderPreview: TabReorderPreview | null;
   onTabDragMove: (tabId: string, point: TabDragPoint) => void;
   onTabDragStart: (tabId: string, point: TabDragPoint) => void;
   onTabDrop: (tabId: string, point: TabDragPoint) => void;
@@ -40,7 +42,10 @@ export function AppHeader({
       className="flex min-w-0 items-center justify-between border-b border-[#2b3044] bg-[#111426] px-3"
       onMouseDown={handleHeaderMouseDown}
     >
-      <div className="flex min-w-0 items-center gap-2">
+      <div
+        className="flex min-w-0 flex-1 items-center gap-2"
+        data-tab-reorder-list="true"
+      >
         <TopPageButton
           active={activePage === "vaults"}
           label="Vaults"
@@ -49,23 +54,24 @@ export function AppHeader({
           <Database size={16} />
           <span>Vaults</span>
         </TopPageButton>
-        {tabs.map((tab) => (
-          <HostTabButton
+        {tabs.map((tab, index) => (
+          <TabReorderSlot
             key={tab.id}
-            active={activePage === "session" && tab.id === activeTabId}
-            canDrag={
-              activePage === "session" &&
-              tab.id !== activeTabId &&
-              canDragTabIntoWorkspace(tab)
-            }
-            tab={tab}
-            onClose={() => onCloseTab(tab.id)}
-            onDragMove={(point) => onTabDragMove(tab.id, point)}
-            onDragStart={(point) => onTabDragStart(tab.id, point)}
-            onDrop={(point) => onTabDrop(tab.id, point)}
-            onSelect={() => onSelectTab(tab.id)}
-          />
+            active={reorderPreview?.targetIndex === index}
+          >
+            <HostTabButton
+              active={activePage === "session" && tab.id === activeTabId}
+              canDrag={activePage === "session"}
+              tab={tab}
+              onClose={() => onCloseTab(tab.id)}
+              onDragMove={(point) => onTabDragMove(tab.id, point)}
+              onDragStart={(point) => onTabDragStart(tab.id, point)}
+              onDrop={(point) => onTabDrop(tab.id, point)}
+              onSelect={() => onSelectTab(tab.id)}
+            />
+          </TabReorderSlot>
         ))}
+        <TabReorderSlot active={reorderPreview?.targetIndex === tabs.length} />
       </div>
 
       <div className="flex items-center text-[#8d93ad]">
@@ -111,6 +117,23 @@ function TopPageButton({
     >
       {children}
     </button>
+  );
+}
+
+function TabReorderSlot({
+  active,
+  children,
+}: {
+  active: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="relative h-8">
+      {active ? (
+        <span className="pointer-events-none absolute top-1 bottom-1 -left-1 z-50 w-0.5 rounded-full bg-[#55c2a2] shadow-[0_0_10px_rgba(85,194,162,0.5)]" />
+      ) : null}
+      {children}
+    </div>
   );
 }
 
@@ -216,6 +239,7 @@ function HostTabButton({
 
   return (
     <div
+      data-tab-reorder-tab-id={tab.id}
       className={`flex h-8 min-w-32 max-w-56 items-center rounded-lg border ${
         active
           ? "border-[#2b3044] bg-[#262b42] text-white"
@@ -248,6 +272,10 @@ function HostTabButton({
 export interface TabDragPoint {
   x: number;
   y: number;
+}
+
+export interface TabReorderPreview {
+  targetIndex: number;
 }
 
 interface TabPointerStart extends TabDragPoint {

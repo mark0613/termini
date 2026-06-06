@@ -9,7 +9,11 @@ import {
   type ProfileFormState,
   type SettingsSection,
 } from "./appTypes";
-import { AppHeader, type TabDragPoint } from "./components/AppHeader";
+import {
+  AppHeader,
+  type TabDragPoint,
+  type TabReorderPreview,
+} from "./components/AppHeader";
 import { AppSidebar } from "./components/AppSidebar";
 import { ProfileDrawer } from "./components/ProfileDrawer";
 import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
@@ -91,6 +95,8 @@ function App() {
   const [dropPreview, setDropPreview] = useState<WorkspaceDropPreview | null>(
     null,
   );
+  const [reorderPreview, setReorderPreview] =
+    useState<TabReorderPreview | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState("");
   const connectingPaneIdsRef = useRef(new Set<string>());
@@ -445,19 +451,26 @@ function App() {
 
   function handleTabDragStart(tabId: string, point: TabDragPoint) {
     const tab = tabs.find((item) => item.id === tabId);
-    if (!tab || tab.id === activeTabId || !canDragTabIntoWorkspace(tab)) return;
+    if (!tab) return;
 
     draggingTabIdRef.current = tabId;
-    updateWorkspaceDropPreview(tabId, point);
+    updateTabDragPreview(tabId, point);
   }
 
   function handleTabDragMove(tabId: string, point: TabDragPoint) {
     const sourceTabId = draggingTabIdRef.current ?? tabId;
-    updateWorkspaceDropPreview(sourceTabId, point);
+    updateTabDragPreview(sourceTabId, point);
   }
 
   function handleTabDrop(tabId: string, point: TabDragPoint) {
     const sourceTabId = draggingTabIdRef.current ?? tabId;
+    const reorderTarget = findTabReorderTarget(point, sourceTabId);
+    if (reorderTarget) {
+      clearTabDragState();
+      reorderTab(sourceTabId, reorderTarget.targetIndex);
+      return;
+    }
+
     const target = findWorkspaceDropTarget(point);
     clearTabDragState();
 
@@ -468,6 +481,23 @@ function App() {
   function clearTabDragState() {
     draggingTabIdRef.current = null;
     setDropPreview(null);
+    setReorderPreview(null);
+  }
+
+  function updateTabDragPreview(sourceTabId: string, point: TabDragPoint) {
+    const reorderTarget = findTabReorderTarget(point, sourceTabId);
+    if (reorderTarget) {
+      setDropPreview(null);
+      setReorderPreview((current) =>
+        current?.targetIndex === reorderTarget.targetIndex
+          ? current
+          : { targetIndex: reorderTarget.targetIndex },
+      );
+      return;
+    }
+
+    setReorderPreview(null);
+    updateWorkspaceDropPreview(sourceTabId, point);
   }
 
   function updateWorkspaceDropPreview(sourceTabId: string, point: TabDragPoint) {
@@ -550,6 +580,68 @@ function App() {
 
     setActiveTabId(targetTabId);
     setActivePage("session");
+  }
+
+  function reorderTab(sourceTabId: string, targetIndex: number) {
+    setTabs((current) => {
+      const sourceIndex = current.findIndex((tab) => tab.id === sourceTabId);
+      if (sourceIndex < 0) return current;
+
+      const boundedTargetIndex = Math.max(
+        0,
+        Math.min(current.length, targetIndex),
+      );
+      const nextIndex =
+        sourceIndex < boundedTargetIndex
+          ? boundedTargetIndex - 1
+          : boundedTargetIndex;
+      if (nextIndex === sourceIndex) return current;
+
+      const nextTabs = current.slice();
+      const [movingTab] = nextTabs.splice(sourceIndex, 1);
+      nextTabs.splice(nextIndex, 0, movingTab);
+      return nextTabs;
+    });
+  }
+
+  function findTabReorderTarget(
+    point: TabDragPoint,
+    sourceTabId: string,
+  ): TabReorderTarget | null {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+
+    const tabList = findTabReorderList(point);
+    if (!tabList) return null;
+
+    const tabElements = Array.from(
+      tabList.querySelectorAll<HTMLElement>("[data-tab-reorder-tab-id]"),
+    );
+    if (!tabElements.length) return null;
+
+    let targetIndex = tabElements.length;
+    for (let index = 0; index < tabElements.length; index += 1) {
+      const rect = tabElements[index].getBoundingClientRect();
+      if (point.x < rect.left + rect.width / 2) {
+        targetIndex = index;
+        break;
+      }
+    }
+
+    const sourceIndex = tabs.findIndex((tab) => tab.id === sourceTabId);
+    if (targetIndex === sourceIndex || targetIndex === sourceIndex + 1) {
+      return null;
+    }
+
+    return { targetIndex };
+  }
+
+  function findTabReorderList(point: TabDragPoint) {
+    for (const element of document.elementsFromPoint(point.x, point.y)) {
+      const target = element.closest<HTMLElement>("[data-tab-reorder-list]");
+      if (target) return target;
+    }
+
+    return null;
   }
 
   function findWorkspaceDropTarget(
@@ -992,6 +1084,7 @@ function App() {
           setActiveTabId(tabId);
           setActivePage("session");
         }}
+        reorderPreview={reorderPreview}
         onTabDragMove={handleTabDragMove}
         onTabDragStart={handleTabDragStart}
         onTabDrop={handleTabDrop}
@@ -1142,6 +1235,10 @@ interface WorkspaceDropTarget {
   tabId: string;
   paneId: string;
   side: WorkspaceDropSide;
+}
+
+interface TabReorderTarget {
+  targetIndex: number;
 }
 
 function getWorkspaceDropSide(
