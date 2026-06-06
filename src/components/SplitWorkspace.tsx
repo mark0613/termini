@@ -38,7 +38,7 @@ export function SplitWorkspace({
             pane={pane}
             active={pane.id === activePaneId}
             terminalTheme={activeTheme}
-            terminalFontSize={terminalFontSize}
+            terminalFontSize={pane.fontSize ?? terminalFontSize}
             onFocus={() => onFocusPane(pane.id)}
             onReady={(cols, rows) => onPaneReady(pane.id, cols, rows)}
             onReconnect={(cols, rows) => onReconnectPane(pane.id, cols, rows)}

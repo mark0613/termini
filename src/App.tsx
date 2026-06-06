@@ -26,6 +26,7 @@ import {
 } from "./terminalThemes";
 import { VaultsPage } from "./pages/VaultsPage";
 import {
+  DEFAULT_TERMINAL_FONT_SIZE,
   collectPanes,
   createTab,
   findFirstPane,
@@ -40,7 +41,6 @@ import {
 import type { Credential, SshProfile, SshStatusEvent, Vault } from "./types";
 
 const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
-const defaultTerminalFontSize = 13;
 const minTerminalFontSize = 9;
 const maxTerminalFontSize = 24;
 
@@ -81,9 +81,6 @@ function App() {
   const [terminalThemeError, setTerminalThemeError] = useState("");
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
-  const [terminalFontSize, setTerminalFontSize] = useState(
-    defaultTerminalFontSize,
-  );
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -98,6 +95,14 @@ function App() {
     () => tabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, tabs],
   );
+  const activeTerminalFontSize = useMemo(() => {
+    if (!activeTab) return DEFAULT_TERMINAL_FONT_SIZE;
+
+    return (
+      findPane(activeTab.root, activeTab.activePaneId)?.fontSize ??
+      DEFAULT_TERMINAL_FONT_SIZE
+    );
+  }, [activeTab]);
   const activeTerminalTheme = useMemo(
     () =>
       terminalThemes.find((theme) => theme.id === activeTerminalThemeId) ??
@@ -201,9 +206,7 @@ function App() {
         if (event.key === "+" || event.key === "=" || event.code === "NumpadAdd") {
           event.preventDefault();
           event.stopPropagation();
-          setTerminalFontSize((current) =>
-            Math.min(maxTerminalFontSize, current + 1),
-          );
+          zoomActivePane(1);
           return;
         }
 
@@ -215,9 +218,7 @@ function App() {
         ) {
           event.preventDefault();
           event.stopPropagation();
-          setTerminalFontSize((current) =>
-            Math.max(minTerminalFontSize, current - 1),
-          );
+          zoomActivePane(-1);
           return;
         }
       }
@@ -328,6 +329,24 @@ function App() {
     }
 
     return null;
+  }
+
+  function zoomActivePane(delta: number) {
+    if (!activeTab) return;
+
+    setTabs((current) =>
+      current.map((tab) => {
+        if (tab.id !== activeTabId) return tab;
+
+        return {
+          ...tab,
+          root: updatePane(tab.root, tab.activePaneId, (pane) => ({
+            ...pane,
+            fontSize: clampTerminalFontSize(pane.fontSize + delta),
+          })),
+        };
+      }),
+    );
   }
 
   function connectProfile(profile: SshProfile) {
@@ -862,7 +881,7 @@ function App() {
               importPassword={importPassword}
               importPath={importPath}
               isBusy={isBusy}
-              terminalFontSize={terminalFontSize}
+              terminalFontSize={activeTerminalFontSize}
               terminalThemeError={terminalThemeError}
               terminalThemes={terminalThemes}
               onActiveTerminalThemeChange={(id) => {
@@ -901,7 +920,7 @@ function App() {
         activeTabId={activeTabId}
         activeVault={activeVault}
         activeTheme={activeTerminalTheme}
-        terminalFontSize={terminalFontSize}
+        terminalFontSize={DEFAULT_TERMINAL_FONT_SIZE}
         themeReady={terminalThemesLoaded}
         profiles={profiles}
         tabs={tabs}
@@ -960,6 +979,10 @@ function App() {
 
 function isRecoverableSshStatus(status: string) {
   return status === "error" || status === "disconnected" || status === "exited";
+}
+
+function clampTerminalFontSize(fontSize: number) {
+  return Math.min(maxTerminalFontSize, Math.max(minTerminalFontSize, fontSize));
 }
 
 export default App;

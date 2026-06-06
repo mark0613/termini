@@ -2,6 +2,8 @@ import type { SshProfile } from "./types";
 
 export type SplitDirection = "vertical" | "horizontal";
 
+export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+
 export interface TerminalPaneState {
   type: "pane";
   id: string;
@@ -11,6 +13,7 @@ export interface TerminalPaneState {
   endpoint: string | null;
   status: string;
   message: string | null;
+  fontSize: number;
 }
 
 export interface SplitNodeState {
@@ -29,7 +32,10 @@ export interface TerminalTab {
   activePaneId: string;
 }
 
-export function createPane(profile?: SshProfile): TerminalPaneState {
+export function createPane(
+  profile?: SshProfile,
+  fontSize = DEFAULT_TERMINAL_FONT_SIZE,
+): TerminalPaneState {
   return {
     type: "pane",
     id: crypto.randomUUID(),
@@ -41,6 +47,7 @@ export function createPane(profile?: SshProfile): TerminalPaneState {
       : null,
     status: profile ? "pending" : "idle",
     message: null,
+    fontSize,
   };
 }
 
@@ -124,7 +131,7 @@ export function splitPane(
     }
 
     const newPane: TerminalPaneState = {
-      ...createPane(),
+      ...createPane(undefined, node.fontSize),
       profileId: node.profileId,
       title: node.title,
       endpoint: node.endpoint,
