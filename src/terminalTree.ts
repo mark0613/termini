@@ -1,8 +1,10 @@
 import type { SshProfile } from "./types";
 
 export type SplitDirection = "vertical" | "horizontal";
+export type WorkspaceDropSide = "left" | "right" | "top" | "bottom";
 
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+export const WORKSPACE_TAB_TITLE = "Workspace";
 
 export interface TerminalPaneState {
   type: "pane";
@@ -30,6 +32,7 @@ export interface TerminalTab {
   title: string;
   root: WorkspaceNode;
   activePaneId: string;
+  workspace: boolean;
 }
 
 export function createPane(
@@ -58,7 +61,12 @@ export function createTab(profile?: SshProfile): TerminalTab {
     title: profile?.name ?? "New tab",
     root: pane,
     activePaneId: pane.id,
+    workspace: false,
   };
+}
+
+export function canDragTabIntoWorkspace(tab: TerminalTab): boolean {
+  return !tab.workspace && tab.root.type === "pane";
 }
 
 export function updatePane(
@@ -162,6 +170,50 @@ export function splitPane(
     node: { ...node, children: [node.children[0], second.node] },
     newPaneId: second.newPaneId,
   };
+}
+
+export function insertWorkspaceAtPane(
+  node: WorkspaceNode,
+  paneId: string,
+  insertedNode: WorkspaceNode,
+  side: WorkspaceDropSide,
+): { node: WorkspaceNode; inserted: boolean } {
+  if (node.type === "pane") {
+    if (node.id !== paneId) {
+      return { node, inserted: false };
+    }
+
+    const direction = side === "left" || side === "right" ? "vertical" : "horizontal";
+    const insertedFirst = side === "left" || side === "top";
+
+    return {
+      node: {
+        type: "split",
+        id: crypto.randomUUID(),
+        direction,
+        children: insertedFirst ? [insertedNode, node] : [node, insertedNode],
+      },
+      inserted: true,
+    };
+  }
+
+  const first = insertWorkspaceAtPane(node.children[0], paneId, insertedNode, side);
+  if (first.inserted) {
+    return {
+      node: { ...node, children: [first.node, node.children[1]] },
+      inserted: true,
+    };
+  }
+
+  const second = insertWorkspaceAtPane(node.children[1], paneId, insertedNode, side);
+  if (second.inserted) {
+    return {
+      node: { ...node, children: [node.children[0], second.node] },
+      inserted: true,
+    };
+  }
+
+  return { node, inserted: false };
 }
 
 export function removePane(

@@ -29,6 +29,33 @@ import type { TerminalPaneState } from "../terminalTree";
 
 const passwordPromptPopoverWidth = 176;
 const passwordPromptPopoverHeight = 34;
+const preservedTerminalPaneIds = new Set<string>();
+const terminalRuntimeCache = new Map<string, TerminalRuntime>();
+
+interface TerminalRuntime {
+  terminal: Terminal;
+  fitAddon: FitAddon;
+  disposeTimer: number | null;
+  mountCount: number;
+}
+
+export function preserveTerminalPaneRuntime(paneId: string) {
+  preservedTerminalPaneIds.add(paneId);
+}
+
+function scheduleTerminalRuntimeDispose(paneId: string) {
+  const runtime = terminalRuntimeCache.get(paneId);
+  if (!runtime || runtime.disposeTimer || runtime.mountCount > 0) return;
+
+  const delay = preservedTerminalPaneIds.delete(paneId) ? 1200 : 120;
+  runtime.disposeTimer = window.setTimeout(() => {
+    const current = terminalRuntimeCache.get(paneId);
+    if (current !== runtime) return;
+
+    terminalRuntimeCache.delete(paneId);
+    runtime.terminal.dispose();
+  }, delay);
+}
 
 interface TerminalPaneProps {
   pane: TerminalPaneState;
@@ -59,6 +86,9 @@ export function TerminalPane({
   const sessionIdRef = useRef<string | null>(pane.sessionId);
   const connectedRef = useRef(pane.status === "connected");
   const lastDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
+  const lastClearedSessionRef = useRef<string | null>(
+    pane.status === "connected" ? pane.sessionId : null,
+  );
   const lastNoticeRef = useRef("");
   const overlayStartedRef = useRef(false);
   const overlayTimersRef = useRef<number[]>([]);
@@ -122,6 +152,11 @@ export function TerminalPane({
     }
 
     if (pane.status === "connected") {
+      if (!overlayStartedRef.current) {
+        setOverlayVisible(false);
+        return;
+      }
+
       clearOverlayTimers();
       setOverlayVisible(true);
       setOverlayStep(2);
@@ -142,24 +177,44 @@ export function TerminalPane({
   useEffect(() => {
     if (!hostRef.current) return;
 
-    const terminal = new Terminal({
-      allowProposedApi: true,
-      cursorBlink: true,
-      convertEol: true,
-      fontFamily:
-        "Cascadia Mono, JetBrains Mono, Consolas, ui-monospace, monospace",
-      fontSize: terminalFontSize,
-      theme: {
-        ...xtermTheme,
-      },
-    });
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(hostRef.current);
+    const cachedRuntime = terminalRuntimeCache.get(pane.id);
+    if (cachedRuntime?.disposeTimer) {
+      window.clearTimeout(cachedRuntime.disposeTimer);
+      cachedRuntime.disposeTimer = null;
+    }
+
+    const terminal =
+      cachedRuntime?.terminal ??
+      new Terminal({
+        allowProposedApi: true,
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily:
+          "Cascadia Mono, JetBrains Mono, Consolas, ui-monospace, monospace",
+        fontSize: terminalFontSize,
+        theme: {
+          ...xtermTheme,
+        },
+      });
+    const fitAddon = cachedRuntime?.fitAddon ?? new FitAddon();
+
+    const runtime =
+      cachedRuntime ?? { terminal, fitAddon, disposeTimer: null, mountCount: 0 };
+    runtime.mountCount += 1;
+
+    if (!cachedRuntime) {
+      terminal.loadAddon(fitAddon);
+      terminal.open(hostRef.current);
+      terminalRuntimeCache.set(pane.id, runtime);
+    } else if (terminal.element) {
+      hostRef.current.appendChild(terminal.element);
+    }
+
+    terminal.options.fontSize = terminalFontSize;
     applyTerminalTheme(terminal, xtermTheme);
     fitAddon.fit();
 
-    terminal.onData((data) => {
+    const dataDisposable = terminal.onData((data) => {
       hidePasswordPrompt();
       const sessionId = sessionIdRef.current;
       if (connectedRef.current && sessionId) {
@@ -212,6 +267,7 @@ export function TerminalPane({
     });
     observer.observe(hostRef.current);
 
+    let disposed = false;
     let unlisten: UnlistenFn | null = null;
     void listen<SshOutputEvent>("ssh-output", (event) => {
       const sessionId = sessionIdRef.current;
@@ -220,15 +276,22 @@ export function TerminalPane({
         recordOutputTail(event.payload.data);
       });
     }).then((handler) => {
+      if (disposed) {
+        handler();
+        return;
+      }
       unlisten = handler;
     });
 
     return () => {
+      disposed = true;
       observer.disconnect();
       unlisten?.();
-      terminal.dispose();
+      dataDisposable.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
+      runtime.mountCount = Math.max(0, runtime.mountCount - 1);
+      scheduleTerminalRuntimeDispose(pane.id);
     };
   }, []);
 
@@ -266,8 +329,17 @@ export function TerminalPane({
   }, [active]);
 
   useEffect(() => {
-    if (pane.status === "connected") {
+    if (
+      pane.status === "connected" &&
+      lastClearedSessionRef.current !== pane.sessionId
+    ) {
       terminalRef.current?.clear();
+      lastClearedSessionRef.current = pane.sessionId;
+      return;
+    }
+
+    if (pane.status !== "connected") {
+      lastClearedSessionRef.current = null;
     }
   }, [pane.sessionId, pane.status]);
 

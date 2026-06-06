@@ -9,12 +9,13 @@ import {
   type ProfileFormState,
   type SettingsSection,
 } from "./appTypes";
-import { AppHeader } from "./components/AppHeader";
+import { AppHeader, type TabDragPoint } from "./components/AppHeader";
 import { AppSidebar } from "./components/AppSidebar";
 import { ProfileDrawer } from "./components/ProfileDrawer";
 import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
+import { preserveTerminalPaneRuntime } from "./components/TerminalPane";
 import { ThemeEditorModal } from "./components/ThemeEditorModal";
-import { SessionPage } from "./pages/SessionPage";
+import { SessionPage, type WorkspaceDropPreview } from "./pages/SessionPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import {
   DEFAULT_TERMINAL_THEME,
@@ -27,14 +28,18 @@ import {
 import { VaultsPage } from "./pages/VaultsPage";
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
+  WORKSPACE_TAB_TITLE,
+  canDragTabIntoWorkspace,
   collectPanes,
   createTab,
   findFirstPane,
   findPane,
+  insertWorkspaceAtPane,
   removePane,
   splitPane,
   type SplitDirection,
   type TerminalTab,
+  type WorkspaceDropSide,
   updatePane,
   updatePaneBySession,
 } from "./terminalTree";
@@ -83,9 +88,13 @@ function App() {
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
+  const [dropPreview, setDropPreview] = useState<WorkspaceDropPreview | null>(
+    null,
+  );
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState("");
   const connectingPaneIdsRef = useRef(new Set<string>());
+  const draggingTabIdRef = useRef<string | null>(null);
 
   const activeVault = useMemo(
     () => vaults.find((vault) => vault.id === activeVaultId) ?? null,
@@ -422,13 +431,150 @@ function App() {
       current.map((tab) => {
         if (tab.id !== activeTabId) return tab;
         const result = splitPane(tab.root, tab.activePaneId, direction);
+        const splitCreated = Boolean(result.newPaneId);
         return {
           ...tab,
+          title: splitCreated ? WORKSPACE_TAB_TITLE : tab.title,
+          workspace: splitCreated ? true : tab.workspace,
           root: result.node,
           activePaneId: result.newPaneId ?? tab.activePaneId,
         };
       }),
     );
+  }
+
+  function handleTabDragStart(tabId: string, point: TabDragPoint) {
+    const tab = tabs.find((item) => item.id === tabId);
+    if (!tab || tab.id === activeTabId || !canDragTabIntoWorkspace(tab)) return;
+
+    draggingTabIdRef.current = tabId;
+    updateWorkspaceDropPreview(tabId, point);
+  }
+
+  function handleTabDragMove(tabId: string, point: TabDragPoint) {
+    const sourceTabId = draggingTabIdRef.current ?? tabId;
+    updateWorkspaceDropPreview(sourceTabId, point);
+  }
+
+  function handleTabDrop(tabId: string, point: TabDragPoint) {
+    const sourceTabId = draggingTabIdRef.current ?? tabId;
+    const target = findWorkspaceDropTarget(point);
+    clearTabDragState();
+
+    if (!target) return;
+    commitWorkspaceDrop(sourceTabId, target.tabId, target.paneId, target.side);
+  }
+
+  function clearTabDragState() {
+    draggingTabIdRef.current = null;
+    setDropPreview(null);
+  }
+
+  function updateWorkspaceDropPreview(sourceTabId: string, point: TabDragPoint) {
+    const target = findWorkspaceDropTarget(point);
+    if (!target || sourceTabId === target.tabId) {
+      setDropPreview(null);
+      return;
+    }
+
+    const draggingTab = tabs.find((tab) => tab.id === sourceTabId);
+    if (!draggingTab || !canDragTabIntoWorkspace(draggingTab)) {
+      setDropPreview(null);
+      return;
+    }
+
+    setDropPreview((current) => {
+      if (
+        current?.targetTabId === target.tabId &&
+        current.targetPaneId === target.paneId &&
+        current.side === target.side
+      ) {
+        return current;
+      }
+
+      return {
+        targetTabId: target.tabId,
+        targetPaneId: target.paneId,
+        side: target.side,
+      };
+    });
+  }
+
+  function commitWorkspaceDrop(
+    sourceTabId: string,
+    targetTabId: string,
+    targetPaneId: string,
+    side: WorkspaceDropSide,
+  ) {
+    if (!sourceTabId || sourceTabId === targetTabId) return;
+
+    setTabs((current) => {
+      const sourceTab = current.find((tab) => tab.id === sourceTabId);
+      const targetTab = current.find((tab) => tab.id === targetTabId);
+      if (
+        !sourceTab ||
+        !targetTab ||
+        sourceTab.id === targetTab.id ||
+        !canDragTabIntoWorkspace(sourceTab)
+      ) {
+        return current;
+      }
+
+      const result = insertWorkspaceAtPane(
+        targetTab.root,
+        targetPaneId,
+        sourceTab.root,
+        side,
+      );
+      if (!result.inserted) return current;
+
+      if (sourceTab.root.type === "pane") {
+        preserveTerminalPaneRuntime(sourceTab.root.id);
+      }
+
+      return current.flatMap((tab) => {
+        if (tab.id === sourceTab.id) return [];
+        if (tab.id !== targetTab.id) return [tab];
+
+        return [
+          {
+            ...tab,
+            title: WORKSPACE_TAB_TITLE,
+            workspace: true,
+            root: result.node,
+            activePaneId: sourceTab.activePaneId,
+          },
+        ];
+      });
+    });
+
+    setActiveTabId(targetTabId);
+    setActivePage("session");
+  }
+
+  function findWorkspaceDropTarget(
+    point: TabDragPoint,
+  ): WorkspaceDropTarget | null {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+
+    for (const element of document.elementsFromPoint(point.x, point.y)) {
+      const target = element.closest<HTMLElement>(
+        "[data-workspace-drop-pane-id][data-workspace-drop-tab-id]",
+      );
+      if (!target) continue;
+
+      const paneId = target.dataset.workspaceDropPaneId;
+      const tabId = target.dataset.workspaceDropTabId;
+      if (!paneId || !tabId) continue;
+
+      return {
+        paneId,
+        tabId,
+        side: getWorkspaceDropSide(target, point),
+      };
+    }
+
+    return null;
   }
 
   function closePane(paneId: string) {
@@ -451,7 +597,14 @@ function App() {
         if (!result.node) continue;
         const nextActive =
           tab.activePaneId === paneId ? findFirstPane(result.node).id : tab.activePaneId;
-        nextTabs.push({ ...tab, root: result.node, activePaneId: nextActive });
+        nextTabs.push({
+          ...tab,
+          title:
+            result.node.type === "pane" ? result.node.title : WORKSPACE_TAB_TITLE,
+          workspace: result.node.type === "split",
+          root: result.node,
+          activePaneId: nextActive,
+        });
       }
 
       if (nextTabs.length === 0) {
@@ -839,6 +992,9 @@ function App() {
           setActiveTabId(tabId);
           setActivePage("session");
         }}
+        onTabDragMove={handleTabDragMove}
+        onTabDragStart={handleTabDragStart}
+        onTabDrop={handleTabDrop}
         onVaultsClick={() => setActivePage("vaults")}
       />
 
@@ -920,6 +1076,7 @@ function App() {
         activeTabId={activeTabId}
         activeVault={activeVault}
         activeTheme={activeTerminalTheme}
+        dropPreview={dropPreview}
         terminalFontSize={DEFAULT_TERMINAL_FONT_SIZE}
         themeReady={terminalThemesLoaded}
         profiles={profiles}
@@ -979,6 +1136,31 @@ function App() {
 
 function isRecoverableSshStatus(status: string) {
   return status === "error" || status === "disconnected" || status === "exited";
+}
+
+interface WorkspaceDropTarget {
+  tabId: string;
+  paneId: string;
+  side: WorkspaceDropSide;
+}
+
+function getWorkspaceDropSide(
+  target: HTMLElement,
+  point: TabDragPoint,
+): WorkspaceDropSide {
+  const rect = target.getBoundingClientRect();
+  const x = point.x - rect.left;
+  const y = point.y - rect.top;
+  const distances = [
+    { side: "left" as const, value: x },
+    { side: "right" as const, value: rect.width - x },
+    { side: "top" as const, value: y },
+    { side: "bottom" as const, value: rect.height - y },
+  ];
+
+  return distances.reduce((closest, next) =>
+    next.value < closest.value ? next : closest,
+  ).side;
 }
 
 function clampTerminalFontSize(fontSize: number) {

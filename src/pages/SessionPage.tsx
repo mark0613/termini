@@ -1,13 +1,21 @@
 import { Search, Terminal } from "lucide-react";
-import { SplitWorkspace } from "../components/SplitWorkspace";
+import {
+  SplitWorkspace,
+  type WorkspaceDropPreviewState,
+} from "../components/SplitWorkspace";
 import type { TerminalThemeConfig } from "../terminalThemes";
 import { collectPanes, type TerminalTab } from "../terminalTree";
 import type { SshProfile, Vault } from "../types";
+
+export interface WorkspaceDropPreview extends WorkspaceDropPreviewState {
+  targetTabId: string;
+}
 
 export function SessionPage({
   activeTabId,
   activeVault,
   activeTheme,
+  dropPreview,
   terminalFontSize,
   themeReady,
   profiles,
@@ -22,6 +30,7 @@ export function SessionPage({
   activeTabId: string;
   activeVault: Vault | null;
   activeTheme: TerminalThemeConfig;
+  dropPreview: WorkspaceDropPreview | null;
   terminalFontSize: number;
   themeReady: boolean;
   profiles: SshProfile[];
@@ -60,8 +69,12 @@ export function SessionPage({
                 aria-hidden={!isActive}
               >
                 <SplitWorkspace
+                  tabId={tab.id}
                   activePaneId={tab.activePaneId}
                   activeTheme={activeTheme}
+                  dropPreview={
+                    dropPreview?.targetTabId === tab.id ? dropPreview : null
+                  }
                   terminalFontSize={terminalFontSize}
                   node={tab.root}
                   onClosePane={onClosePane}

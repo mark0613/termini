@@ -1,7 +1,8 @@
 import { Database, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useRef } from "react";
 import type { AppPage } from "../appTypes";
-import type { TerminalTab } from "../terminalTree";
+import { canDragTabIntoWorkspace, type TerminalTab } from "../terminalTree";
 
 const appWindow = getCurrentWindow();
 
@@ -11,6 +12,9 @@ export function AppHeader({
   tabs,
   onCloseTab,
   onSelectTab,
+  onTabDragMove,
+  onTabDragStart,
+  onTabDrop,
   onVaultsClick,
 }: {
   activePage: AppPage;
@@ -18,6 +22,9 @@ export function AppHeader({
   tabs: TerminalTab[];
   onCloseTab: (tabId: string) => void;
   onSelectTab: (tabId: string) => void;
+  onTabDragMove: (tabId: string, point: TabDragPoint) => void;
+  onTabDragStart: (tabId: string, point: TabDragPoint) => void;
+  onTabDrop: (tabId: string, point: TabDragPoint) => void;
   onVaultsClick: () => void;
 }) {
   async function handleHeaderMouseDown(event: React.MouseEvent<HTMLElement>) {
@@ -46,8 +53,16 @@ export function AppHeader({
           <HostTabButton
             key={tab.id}
             active={activePage === "session" && tab.id === activeTabId}
+            canDrag={
+              activePage === "session" &&
+              tab.id !== activeTabId &&
+              canDragTabIntoWorkspace(tab)
+            }
             tab={tab}
             onClose={() => onCloseTab(tab.id)}
+            onDragMove={(point) => onTabDragMove(tab.id, point)}
+            onDragStart={(point) => onTabDragStart(tab.id, point)}
+            onDrop={(point) => onTabDrop(tab.id, point)}
             onSelect={() => onSelectTab(tab.id)}
           />
         ))}
@@ -101,15 +116,104 @@ function TopPageButton({
 
 function HostTabButton({
   active,
+  canDrag,
   tab,
+  onDragMove,
+  onDragStart,
+  onDrop,
   onSelect,
   onClose,
 }: {
   active: boolean;
+  canDrag: boolean;
   tab: TerminalTab;
+  onDragMove: (point: TabDragPoint) => void;
+  onDragStart: (point: TabDragPoint) => void;
+  onDrop: (point: TabDragPoint) => void;
   onSelect: () => void;
   onClose: () => void;
 }) {
+  const pointerStartRef = useRef<TabPointerStart | null>(null);
+  const draggingRef = useRef(false);
+  const suppressClickRef = useRef(false);
+
+  function handlePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!canDrag || event.button !== 0) {
+      return;
+    }
+
+    event.stopPropagation();
+    pointerStartRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const start = pointerStartRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+
+    const point = toTabDragPoint(event);
+    const moved = Math.hypot(point.x - start.x, point.y - start.y);
+    if (!draggingRef.current && moved < 4) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!draggingRef.current) {
+      draggingRef.current = true;
+      suppressClickRef.current = true;
+      onDragStart(point);
+    }
+    onDragMove(point);
+  }
+
+  function handlePointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    finishPointerDrag(event, true);
+  }
+
+  function handlePointerCancel(event: React.PointerEvent<HTMLButtonElement>) {
+    finishPointerDrag(event, false);
+  }
+
+  function finishPointerDrag(
+    event: React.PointerEvent<HTMLButtonElement>,
+    commit: boolean,
+  ) {
+    const start = pointerStartRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+
+    pointerStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (!draggingRef.current) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    draggingRef.current = false;
+
+    if (commit) {
+      onDrop(toTabDragPoint(event));
+    } else {
+      onDrop({ x: Number.NaN, y: Number.NaN });
+    }
+  }
+
+  function handleClick(event: React.MouseEvent<HTMLButtonElement>) {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    onSelect();
+  }
+
   return (
     <div
       className={`flex h-8 min-w-32 max-w-56 items-center rounded-lg border ${
@@ -121,7 +225,11 @@ function HostTabButton({
       <button
         type="button"
         className="min-w-0 flex-1 px-3 text-left text-sm font-semibold"
-        onClick={onSelect}
+        onClick={handleClick}
+        onPointerCancel={handlePointerCancel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
       >
         <span className="block truncate">{tab.title}</span>
       </button>
@@ -135,6 +243,19 @@ function HostTabButton({
       </button>
     </div>
   );
+}
+
+export interface TabDragPoint {
+  x: number;
+  y: number;
+}
+
+interface TabPointerStart extends TabDragPoint {
+  pointerId: number;
+}
+
+function toTabDragPoint(event: React.PointerEvent<HTMLButtonElement>): TabDragPoint {
+  return { x: event.clientX, y: event.clientY };
 }
 
 function isWindowControlTarget(target: EventTarget) {
