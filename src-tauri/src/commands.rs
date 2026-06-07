@@ -99,6 +99,7 @@ pub fn create_profile(
         input.host,
         input.port,
         input.username,
+        input.ssh_key_path,
     ))
 }
 
@@ -114,6 +115,7 @@ pub fn update_profile(
         input.host,
         input.port,
         input.username,
+        input.ssh_key_path,
     ))
 }
 
@@ -182,10 +184,10 @@ pub async fn connect_ssh(
 ) -> Result<SshSessionInfo, String> {
     let result = async {
         let profile = state.storage.get_profile(&input.profile_id)?;
-        let credential_id = profile.credential_id.clone().ok_or_else(|| {
-            crate::error::AppError::InvalidInput("profile does not have a credential".to_string())
-        })?;
-        let password = state.storage.get_password(&credential_id)?;
+        let password = match &profile.credential_id {
+            Some(credential_id) => Some(state.storage.get_password(credential_id)?),
+            None => None,
+        };
         state
             .ssh
             .connect(
@@ -233,6 +235,11 @@ pub async fn send_profile_password(
 ) -> Result<(), String> {
     let result = async {
         let credential_id = state.ssh.credential_id(&input.session_id).await?;
+        let credential_id = credential_id.ok_or_else(|| {
+            crate::error::AppError::InvalidInput(
+                "this SSH session does not have a saved password".to_string(),
+            )
+        })?;
         let password = state.storage.get_password(&credential_id)?;
         state
             .ssh

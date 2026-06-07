@@ -7,6 +7,7 @@ import {
   Drawer,
   ErrorBanner,
   Field,
+  PathField,
 } from "./ui";
 
 export function ProfileDrawer({
@@ -19,6 +20,7 @@ export function ProfileDrawer({
   onChange,
   onClose,
   onDelete,
+  onChooseSshKeyPath,
   onTogglePasswordVisibility,
   onSubmit,
 }: {
@@ -31,6 +33,7 @@ export function ProfileDrawer({
   onChange: (form: ProfileFormState) => void;
   onClose: () => void;
   onDelete: () => void;
+  onChooseSshKeyPath: () => void;
   onTogglePasswordVisibility: () => void;
   onSubmit: (event: FormEvent) => void;
 }) {
@@ -81,7 +84,7 @@ export function ProfileDrawer({
             disabled={passwordLoading}
             value={form.password}
             onChange={(password) => onChange({ ...form, password })}
-            placeholder="Password"
+            placeholder="Password (optional)"
             type={passwordVisible ? "text" : "password"}
           />
           <button
@@ -95,6 +98,12 @@ export function ProfileDrawer({
             {passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}
           </button>
         </div>
+        <PathField
+          value={form.sshKeyPath}
+          onChange={(sshKeyPath) => onChange({ ...form, sshKeyPath })}
+          placeholder="SSH key path (optional)"
+          onBrowse={onChooseSshKeyPath}
+        />
         <div className="flex gap-2 pt-2">
           <ActionButton type="submit" disabled={isBusy}>
             <Save size={16} />

@@ -31,6 +31,7 @@ pub struct SshProfile {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub ssh_key_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -85,6 +86,7 @@ pub struct CreateProfileInput {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +98,7 @@ pub struct UpdateProfileInput {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,7 +172,7 @@ pub struct SshSessionInput {
 pub struct SshSessionInfo {
     pub session_id: String,
     pub profile_id: String,
-    pub credential_id: String,
+    pub credential_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -237,6 +240,8 @@ pub struct ExportProfile {
     pub host: String,
     pub port: u16,
     pub username: String,
+    #[serde(default)]
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

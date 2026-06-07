@@ -10,6 +10,7 @@ export interface ProfileFormState {
   username: string;
   password: string;
   credentialId: string;
+  sshKeyPath: string;
 }
 
 export const emptyProfileForm: ProfileFormState = {
@@ -19,6 +20,7 @@ export const emptyProfileForm: ProfileFormState = {
   username: "",
   password: "",
   credentialId: "",
+  sshKeyPath: "",
 };
 
 export function toProfileForm(profile: SshProfile): ProfileFormState {
@@ -29,5 +31,6 @@ export function toProfileForm(profile: SshProfile): ProfileFormState {
     username: profile.username,
     password: "",
     credentialId: profile.credentialId ?? "",
+    sshKeyPath: profile.sshKeyPath ?? "",
   };
 }

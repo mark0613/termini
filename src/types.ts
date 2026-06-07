@@ -23,6 +23,7 @@ export interface SshProfile {
   host: string;
   port: number;
   username: string;
+  sshKeyPath: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,7 +45,7 @@ export interface TerminalTheme {
 export interface SshSessionInfo {
   sessionId: string;
   profileId: string;
-  credentialId: string;
+  credentialId: string | null;
 }
 
 export interface SshOutputEvent {

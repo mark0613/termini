@@ -180,7 +180,7 @@ impl Storage {
     pub fn list_profiles(&self, vault_id: &str) -> AppResult<Vec<SshProfile>> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, vault_id, credential_id, name, host, port, username, created_at, updated_at
+            "SELECT id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at
              FROM profiles
              WHERE vault_id = ?1
              ORDER BY name",
@@ -197,20 +197,22 @@ impl Storage {
         host: String,
         port: u16,
         username: String,
+        ssh_key_path: Option<String>,
     ) -> AppResult<SshProfile> {
         self.ensure_vault_exists(&vault_id)?;
         self.ensure_credential_in_vault(credential_id.as_deref(), &vault_id)?;
         let name = clean_required(name, "profile name")?;
         let host = clean_required(host, "host")?;
         let username = clean_required(username, "username")?;
+        let ssh_key_path = clean_optional(ssh_key_path);
         let id = Uuid::new_v4().to_string();
         let now = now();
         let conn = self.conn.lock().expect("storage mutex poisoned");
 
         conn.execute(
             "INSERT INTO profiles
-             (id, vault_id, credential_id, name, host, port, username, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 id,
                 vault_id,
@@ -219,6 +221,7 @@ impl Storage {
                 host,
                 i64::from(port),
                 username,
+                ssh_key_path,
                 now,
                 now
             ],
@@ -235,25 +238,28 @@ impl Storage {
         host: String,
         port: u16,
         username: String,
+        ssh_key_path: Option<String>,
     ) -> AppResult<SshProfile> {
         let existing = self.get_profile(&id)?;
         self.ensure_credential_in_vault(credential_id.as_deref(), &existing.vault_id)?;
         let name = clean_required(name, "profile name")?;
         let host = clean_required(host, "host")?;
         let username = clean_required(username, "username")?;
+        let ssh_key_path = clean_optional(ssh_key_path);
         let updated_at = now();
         let conn = self.conn.lock().expect("storage mutex poisoned");
 
         conn.execute(
             "UPDATE profiles
-             SET credential_id = ?1, name = ?2, host = ?3, port = ?4, username = ?5, updated_at = ?6
-             WHERE id = ?7",
+             SET credential_id = ?1, name = ?2, host = ?3, port = ?4, username = ?5, ssh_key_path = ?6, updated_at = ?7
+             WHERE id = ?8",
             params![
                 credential_id,
                 name,
                 host,
                 i64::from(port),
                 username,
+                ssh_key_path,
                 updated_at,
                 id
             ],
@@ -385,6 +391,7 @@ impl Storage {
                     host: profile.host,
                     port: profile.port,
                     username: profile.username,
+                    ssh_key_path: profile.ssh_key_path,
                 })
                 .collect(),
             terminal_themes: terminal_themes
@@ -452,8 +459,8 @@ impl Storage {
 
             conn.execute(
                 "INSERT INTO profiles
-                 (id, vault_id, credential_id, name, host, port, username, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 (id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     new_id,
                     vault_id,
@@ -462,6 +469,7 @@ impl Storage {
                     profile.host,
                     i64::from(profile.port),
                     profile.username,
+                    clean_optional(profile.ssh_key_path.clone()),
                     now,
                     now
                 ],
@@ -530,6 +538,7 @@ impl Storage {
                 host TEXT NOT NULL,
                 port INTEGER NOT NULL,
                 username TEXT NOT NULL,
+                ssh_key_path TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE,
@@ -550,6 +559,7 @@ impl Storage {
             );
             ",
         )?;
+        ensure_profile_ssh_key_path_column(&conn)?;
         Ok(())
     }
 
@@ -626,7 +636,7 @@ impl Storage {
 
     fn get_profile_locked(&self, conn: &Connection, id: &str) -> AppResult<SshProfile> {
         conn.query_row(
-            "SELECT id, vault_id, credential_id, name, host, port, username, created_at, updated_at
+            "SELECT id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at
              FROM profiles
              WHERE id = ?1",
             params![id],
@@ -657,7 +667,7 @@ impl Storage {
         vault_id: &str,
     ) -> AppResult<Vec<SshProfile>> {
         let mut stmt = conn.prepare(
-            "SELECT id, vault_id, credential_id, name, host, port, username, created_at, updated_at
+            "SELECT id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at
              FROM profiles
              WHERE vault_id = ?1
              ORDER BY name",
@@ -755,8 +765,9 @@ fn map_profile(row: &Row<'_>) -> rusqlite::Result<SshProfile> {
         host: row.get(4)?,
         port: u16::try_from(port).unwrap_or(22),
         username: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        ssh_key_path: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -784,6 +795,33 @@ fn clean_required(value: String, field_name: &str) -> AppResult<String> {
         return Err(AppError::InvalidInput(format!("{field_name} is required")));
     }
     Ok(value)
+}
+
+fn clean_optional(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn ensure_profile_ssh_key_path_column(conn: &Connection) -> AppResult<()> {
+    let has_column = {
+        let mut stmt = conn.prepare("PRAGMA table_info(profiles)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut has_column = false;
+        for column in columns {
+            if column? == "ssh_key_path" {
+                has_column = true;
+                break;
+            }
+        }
+        has_column
+    };
+
+    if !has_column {
+        conn.execute("ALTER TABLE profiles ADD COLUMN ssh_key_path TEXT", [])?;
+    }
+
+    Ok(())
 }
 
 fn clean_json_object(value: String, field_name: &str) -> AppResult<String> {

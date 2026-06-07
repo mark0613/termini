@@ -816,6 +816,7 @@ function App() {
     const host = profileForm.host.trim();
     const username = profileForm.username.trim();
     const password = profileForm.password;
+    const sshKeyPath = profileForm.sshKeyPath.trim();
     const port = Number(profileForm.port || 22);
 
     if (!name || !host || !username || !profileForm.port.trim()) {
@@ -825,11 +826,6 @@ function App() {
 
     if (!Number.isFinite(port) || port < 1 || port > 65535) {
       setProfileDrawerError("Port must be a number between 1 and 65535.");
-      return;
-    }
-
-    if (!editingProfileId && !password.trim() && !profileForm.credentialId) {
-      setProfileDrawerError("Password is required for password SSH login.");
       return;
     }
 
@@ -863,6 +859,7 @@ function App() {
         host,
         port,
         username,
+        sshKeyPath: sshKeyPath || null,
       };
 
       if (editingProfileId) {
@@ -938,6 +935,17 @@ function App() {
     if (typeof selectedPath === "string") {
       setImportPath(selectedPath);
       setImportError("");
+    }
+  }
+
+  async function chooseProfileSshKeyPath() {
+    const selectedPath = await open({
+      title: "Choose SSH private key",
+      multiple: false,
+    });
+    if (typeof selectedPath === "string") {
+      setProfileForm((current) => ({ ...current, sshKeyPath: selectedPath }));
+      setProfileDrawerError("");
     }
   }
 
@@ -1201,6 +1209,9 @@ function App() {
           onChange={setProfileForm}
           onClose={closeProfileDrawer}
           onDelete={() => editingProfileId && handleDeleteProfile(editingProfileId)}
+          onChooseSshKeyPath={() => {
+            void chooseProfileSshKeyPath();
+          }}
           onTogglePasswordVisibility={() => {
             void toggleProfilePasswordVisibility();
           }}
