@@ -39,8 +39,11 @@ export function Drawer({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/35">
-      <aside className="absolute top-0 right-0 grid h-full w-full max-w-[420px] grid-rows-[56px_minmax(0,1fr)] border-l border-[#2b3044] bg-[#1d2133] shadow-2xl">
+    <div className="fixed inset-0 z-50 bg-black/35" onMouseDown={onClose}>
+      <aside
+        className="absolute top-0 right-0 grid h-full w-full max-w-[420px] grid-rows-[56px_minmax(0,1fr)] border-l border-[#2b3044] bg-[#1d2133] shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <header className="flex items-center justify-between border-b border-[#2b3044] px-4">
           <h2 className="text-sm font-bold text-white">{title}</h2>
           <IconButton label="Close" onClick={onClose}>
