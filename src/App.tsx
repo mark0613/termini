@@ -1460,6 +1460,9 @@ function App() {
     setError("");
     setProfileDrawerError("");
     try {
+      const previousCredentialId = editingProfileId
+        ? (profiles.find((profile) => profile.id === editingProfileId)?.credentialId ?? null)
+        : null;
       let credentialId = profileForm.credentialId || null;
       if (password.trim()) {
         if (credentialId) {
@@ -1493,6 +1496,9 @@ function App() {
       if (editingProfileId) {
         const profile = await api.updateProfile({ id: editingProfileId, ...payload });
         setSelectedProfileId(profile.id);
+        if (previousCredentialId && previousCredentialId !== credentialId) {
+          await api.deleteCredential(previousCredentialId);
+        }
       } else {
         const profile = await api.createProfile({ vaultId: activeVault.id, ...payload });
         setSelectedProfileId(profile.id);

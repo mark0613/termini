@@ -45,6 +45,15 @@ export function ProfileDrawer({
     : editing && form.credentialId && !form.password
       ? "Show saved password"
       : "Show password";
+  const canClearPassword = editing && Boolean(form.credentialId);
+
+  function handlePasswordChange(password: string) {
+    onChange({
+      ...form,
+      credentialId: editing && !password.trim() ? "" : form.credentialId,
+      password,
+    });
+  }
 
   return (
     <Drawer title={editing ? "Edit host" : "New host"} onClose={onClose}>
@@ -87,14 +96,34 @@ export function ProfileDrawer({
             inputMode="numeric"
           />
         </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_40px] gap-2">
+        <div
+          className={
+            canClearPassword
+              ? "grid grid-cols-[minmax(0,1fr)_40px_40px] gap-2"
+              : "grid grid-cols-[minmax(0,1fr)_40px] gap-2"
+          }
+        >
           <Field
             disabled={passwordLoading}
             value={form.password}
-            onChange={(password) => onChange({ ...form, password })}
+            onChange={handlePasswordChange}
             placeholder="Password (optional)"
             type={passwordVisible ? "text" : "password"}
           />
+          {canClearPassword ? (
+            <button
+              type="button"
+              aria-label="Clear saved password"
+              title="Clear saved password"
+              disabled={isBusy || passwordLoading}
+              className="grid size-10 place-items-center rounded-md border border-[#3a4058] bg-[#33384f] text-[#d5daf0] hover:bg-[#3d435c] hover:text-white disabled:opacity-50"
+              onClick={() => {
+                onChange({ ...form, credentialId: "", password: "" });
+              }}
+            >
+              <X size={16} />
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label={passwordToggleLabel}
