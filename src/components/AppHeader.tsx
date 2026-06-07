@@ -38,6 +38,20 @@ export function AppHeader({
       return;
     }
 
+    if (event.detail === 2) {
+      if (!isHeaderDoubleClickTarget(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      await appWindow.toggleMaximize();
+      return;
+    }
+
+    if (!isHeaderDragTarget(event.target)) {
+      return;
+    }
+
     await appWindow.startDragging();
   }
 
@@ -319,6 +333,7 @@ function HostTabButton({
       <button
         type="button"
         className="grid size-8 shrink-0 place-items-center text-[#9ca4bf] hover:text-[#ffb8c0]"
+        data-tab-close="true"
         onClick={onClose}
         aria-label={`Close ${tab.title}`}
       >
@@ -374,7 +389,15 @@ function toTabDragPoint(event: React.PointerEvent<HTMLButtonElement>): TabDragPo
 }
 
 function isWindowControlTarget(target: EventTarget) {
-  return target instanceof Element && Boolean(target.closest("button"));
+  return target instanceof Element && Boolean(target.closest("[data-window-control]"));
+}
+
+function isHeaderDoubleClickTarget(target: EventTarget) {
+  return target instanceof Element && !target.closest("[data-tab-close]");
+}
+
+function isHeaderDragTarget(target: EventTarget) {
+  return target instanceof Element && !target.closest("button");
 }
 
 function WindowButton({
@@ -397,6 +420,7 @@ function WindowButton({
           ? "hover:bg-[#ff5c7a] hover:text-white"
           : "hover:bg-[#262b42] hover:text-white"
       }`}
+      data-window-control="true"
       onClick={() => {
         void onClick();
       }}
