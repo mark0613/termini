@@ -1,6 +1,7 @@
-import { Eye, EyeOff, LoaderCircle, Save, Trash2 } from "lucide-react";
-import type { FormEvent } from "react";
+import { Eye, EyeOff, LoaderCircle, Save, Trash2, X } from "lucide-react";
+import type { CSSProperties, FormEvent } from "react";
 import type { ProfileFormState } from "../appTypes";
+import { groupTagColor } from "../groupTags";
 import {
   ActionButton,
   DangerButton,
@@ -14,6 +15,7 @@ export function ProfileDrawer({
   editing,
   error,
   form,
+  groupOptions,
   isBusy,
   passwordLoading,
   passwordVisible,
@@ -27,6 +29,7 @@ export function ProfileDrawer({
   editing: boolean;
   error: string;
   form: ProfileFormState;
+  groupOptions: string[];
   isBusy: boolean;
   passwordLoading: boolean;
   passwordVisible: boolean;
@@ -60,6 +63,11 @@ export function ProfileDrawer({
           value={form.name}
           onChange={(name) => onChange({ ...form, name })}
           placeholder="Label"
+        />
+        <GroupTagPicker
+          options={groupOptions}
+          value={form.group}
+          onChange={(group) => onChange({ ...form, group })}
         />
         <Field
           value={form.username}
@@ -119,4 +127,73 @@ export function ProfileDrawer({
       </form>
     </Drawer>
   );
+}
+
+function GroupTagPicker({
+  onChange,
+  options,
+  value,
+}: {
+  onChange: (value: string) => void;
+  options: string[];
+  value: string;
+}) {
+  const selectedGroup = value.trim();
+  const color = groupTagColor(selectedGroup);
+
+  return (
+    <div className="grid gap-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_40px] gap-2">
+        <div className="relative min-w-0">
+          <span
+            className="absolute top-1/2 left-3 size-2.5 -translate-y-1/2 rounded-full"
+            style={{ backgroundColor: color.border }}
+          />
+          <input
+            className="h-10 w-full min-w-0 rounded-md border border-[#3a4058] bg-[#1c2134] pr-3 pl-8 text-sm outline-none placeholder:text-[#7f87a2] focus:border-[#1e9bff]"
+            value={value}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            placeholder="Group tag"
+          />
+        </div>
+        <button
+          type="button"
+          aria-label="Clear group"
+          disabled={!selectedGroup}
+          className="grid size-10 place-items-center rounded-md border border-[#3a4058] bg-[#33384f] text-[#d5daf0] hover:bg-[#3d435c] hover:text-white disabled:opacity-40"
+          onClick={() => onChange("")}
+        >
+          <X size={16} />
+        </button>
+      </div>
+      {options.length ? (
+        <div className="flex flex-wrap gap-2">
+          {options.map((option) => {
+            const selected = option === selectedGroup;
+            return (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={selected}
+                className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-semibold"
+                style={groupTagStyle(option, selected)}
+                onClick={() => onChange(option)}
+              >
+                <span className="truncate">{option}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function groupTagStyle(group: string, selected: boolean): CSSProperties {
+  const color = groupTagColor(group);
+  return {
+    backgroundColor: selected ? color.background : `${color.background}99`,
+    borderColor: selected ? color.text : color.border,
+    color: color.text,
+  };
 }

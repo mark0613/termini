@@ -31,6 +31,7 @@ pub struct SshProfile {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub group: Option<String>,
     pub ssh_key_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -86,6 +87,7 @@ pub struct CreateProfileInput {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub group: Option<String>,
     pub ssh_key_path: Option<String>,
 }
 
@@ -98,6 +100,7 @@ pub struct UpdateProfileInput {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub group: Option<String>,
     pub ssh_key_path: Option<String>,
 }
 
@@ -336,6 +339,8 @@ pub struct ExportProfile {
     pub host: String,
     pub port: u16,
     pub username: String,
+    #[serde(default)]
+    pub group: Option<String>,
     #[serde(default)]
     pub ssh_key_path: Option<String>,
 }

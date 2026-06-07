@@ -101,6 +101,7 @@ pub fn create_profile(
         input.host,
         input.port,
         input.username,
+        input.group,
         input.ssh_key_path,
     ))
 }
@@ -117,6 +118,7 @@ pub fn update_profile(
         input.host,
         input.port,
         input.username,
+        input.group,
         input.ssh_key_path,
     ))
 }

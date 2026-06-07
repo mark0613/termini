@@ -145,12 +145,24 @@ function App() {
       DEFAULT_TERMINAL_THEME,
     [activeTerminalThemeId, terminalThemes],
   );
+  const profileGroupOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          profiles
+            .map((profile) => profile.group?.trim())
+            .filter((group): group is string => Boolean(group)),
+        ),
+      ).sort((left, right) => left.localeCompare(right)),
+    [profiles],
+  );
   const filteredProfiles = useMemo(() => {
     const query = hostSearch.trim().toLowerCase();
     if (!query) return profiles;
     return profiles.filter((profile) =>
       [
         profile.name,
+        profile.group ?? "",
         profile.host,
         profile.username,
         `${profile.username}@${profile.host}`,
@@ -1429,6 +1441,7 @@ function App() {
     const name = profileForm.name.trim();
     const host = profileForm.host.trim();
     const username = profileForm.username.trim();
+    const group = profileForm.group.trim();
     const password = profileForm.password;
     const sshKeyPath = profileForm.sshKeyPath.trim();
     const port = Number(profileForm.port || 22);
@@ -1473,6 +1486,7 @@ function App() {
         host,
         port,
         username,
+        group: group || null,
         sshKeyPath: sshKeyPath || null,
       };
 
@@ -1849,6 +1863,7 @@ function App() {
           editing={Boolean(editingProfileId)}
           error={profileDrawerError}
           form={profileForm}
+          groupOptions={profileGroupOptions}
           isBusy={isBusy}
           passwordLoading={profilePasswordLoading}
           passwordVisible={profilePasswordVisible}

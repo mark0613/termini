@@ -23,6 +23,7 @@ export interface SshProfile {
   host: string;
   port: number;
   username: string;
+  group: string | null;
   sshKeyPath: string | null;
   createdAt: string;
   updatedAt: string;

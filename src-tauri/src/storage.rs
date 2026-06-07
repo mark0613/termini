@@ -180,10 +180,10 @@ impl Storage {
     pub fn list_profiles(&self, vault_id: &str) -> AppResult<Vec<SshProfile>> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at
+            "SELECT id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at
              FROM profiles
              WHERE vault_id = ?1
-             ORDER BY name",
+             ORDER BY COALESCE(group_name, ''), name",
         )?;
         let rows = stmt.query_map(params![vault_id], map_profile)?;
         collect_rows(rows)
@@ -197,6 +197,7 @@ impl Storage {
         host: String,
         port: u16,
         username: String,
+        group: Option<String>,
         ssh_key_path: Option<String>,
     ) -> AppResult<SshProfile> {
         self.ensure_vault_exists(&vault_id)?;
@@ -204,6 +205,7 @@ impl Storage {
         let name = clean_required(name, "profile name")?;
         let host = clean_required(host, "host")?;
         let username = clean_required(username, "username")?;
+        let group = clean_optional(group);
         let ssh_key_path = clean_optional(ssh_key_path);
         let id = Uuid::new_v4().to_string();
         let now = now();
@@ -211,8 +213,8 @@ impl Storage {
 
         conn.execute(
             "INSERT INTO profiles
-             (id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             (id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 vault_id,
@@ -221,6 +223,7 @@ impl Storage {
                 host,
                 i64::from(port),
                 username,
+                group,
                 ssh_key_path,
                 now,
                 now
@@ -238,6 +241,7 @@ impl Storage {
         host: String,
         port: u16,
         username: String,
+        group: Option<String>,
         ssh_key_path: Option<String>,
     ) -> AppResult<SshProfile> {
         let existing = self.get_profile(&id)?;
@@ -245,20 +249,22 @@ impl Storage {
         let name = clean_required(name, "profile name")?;
         let host = clean_required(host, "host")?;
         let username = clean_required(username, "username")?;
+        let group = clean_optional(group);
         let ssh_key_path = clean_optional(ssh_key_path);
         let updated_at = now();
         let conn = self.conn.lock().expect("storage mutex poisoned");
 
         conn.execute(
             "UPDATE profiles
-             SET credential_id = ?1, name = ?2, host = ?3, port = ?4, username = ?5, ssh_key_path = ?6, updated_at = ?7
-             WHERE id = ?8",
+             SET credential_id = ?1, name = ?2, host = ?3, port = ?4, username = ?5, group_name = ?6, ssh_key_path = ?7, updated_at = ?8
+             WHERE id = ?9",
             params![
                 credential_id,
                 name,
                 host,
                 i64::from(port),
                 username,
+                group,
                 ssh_key_path,
                 updated_at,
                 id
@@ -391,6 +397,7 @@ impl Storage {
                     host: profile.host,
                     port: profile.port,
                     username: profile.username,
+                    group: profile.group,
                     ssh_key_path: profile.ssh_key_path,
                 })
                 .collect(),
@@ -459,8 +466,8 @@ impl Storage {
 
             conn.execute(
                 "INSERT INTO profiles
-                 (id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 (id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     new_id,
                     vault_id,
@@ -469,6 +476,7 @@ impl Storage {
                     profile.host,
                     i64::from(profile.port),
                     profile.username,
+                    clean_optional(profile.group.clone()),
                     clean_optional(profile.ssh_key_path.clone()),
                     now,
                     now
@@ -538,6 +546,7 @@ impl Storage {
                 host TEXT NOT NULL,
                 port INTEGER NOT NULL,
                 username TEXT NOT NULL,
+                group_name TEXT,
                 ssh_key_path TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -559,6 +568,7 @@ impl Storage {
             );
             ",
         )?;
+        ensure_profile_group_name_column(&conn)?;
         ensure_profile_ssh_key_path_column(&conn)?;
         Ok(())
     }
@@ -636,7 +646,7 @@ impl Storage {
 
     fn get_profile_locked(&self, conn: &Connection, id: &str) -> AppResult<SshProfile> {
         conn.query_row(
-            "SELECT id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at
+            "SELECT id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at
              FROM profiles
              WHERE id = ?1",
             params![id],
@@ -667,10 +677,10 @@ impl Storage {
         vault_id: &str,
     ) -> AppResult<Vec<SshProfile>> {
         let mut stmt = conn.prepare(
-            "SELECT id, vault_id, credential_id, name, host, port, username, ssh_key_path, created_at, updated_at
+            "SELECT id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at
              FROM profiles
              WHERE vault_id = ?1
-             ORDER BY name",
+             ORDER BY COALESCE(group_name, ''), name",
         )?;
         let rows = stmt.query_map(params![vault_id], map_profile)?;
         collect_rows(rows)
@@ -765,9 +775,10 @@ fn map_profile(row: &Row<'_>) -> rusqlite::Result<SshProfile> {
         host: row.get(4)?,
         port: u16::try_from(port).unwrap_or(22),
         username: row.get(6)?,
-        ssh_key_path: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        group: row.get(7)?,
+        ssh_key_path: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 
@@ -819,6 +830,27 @@ fn ensure_profile_ssh_key_path_column(conn: &Connection) -> AppResult<()> {
 
     if !has_column {
         conn.execute("ALTER TABLE profiles ADD COLUMN ssh_key_path TEXT", [])?;
+    }
+
+    Ok(())
+}
+
+fn ensure_profile_group_name_column(conn: &Connection) -> AppResult<()> {
+    let has_column = {
+        let mut stmt = conn.prepare("PRAGMA table_info(profiles)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut has_column = false;
+        for column in columns {
+            if column? == "group_name" {
+                has_column = true;
+                break;
+            }
+        }
+        has_column
+    };
+
+    if !has_column {
+        conn.execute("ALTER TABLE profiles ADD COLUMN group_name TEXT", [])?;
     }
 
     Ok(())

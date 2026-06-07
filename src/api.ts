@@ -68,6 +68,7 @@ export function createProfile(input: {
   host: string;
   port: number;
   username: string;
+  group: string | null;
   sshKeyPath: string | null;
 }) {
   return invoke<SshProfile>("create_profile", { input });
@@ -80,6 +81,7 @@ export function updateProfile(input: {
   host: string;
   port: number;
   username: string;
+  group: string | null;
   sshKeyPath: string | null;
 }) {
   return invoke<SshProfile>("update_profile", { input });

@@ -8,6 +8,7 @@ export interface ProfileFormState {
   host: string;
   port: string;
   username: string;
+  group: string;
   password: string;
   credentialId: string;
   sshKeyPath: string;
@@ -18,6 +19,7 @@ export const emptyProfileForm: ProfileFormState = {
   host: "",
   port: "22",
   username: "",
+  group: "",
   password: "",
   credentialId: "",
   sshKeyPath: "",
@@ -29,6 +31,7 @@ export function toProfileForm(profile: SshProfile): ProfileFormState {
     host: profile.host,
     port: String(profile.port),
     username: profile.username,
+    group: profile.group ?? "",
     password: "",
     credentialId: profile.credentialId ?? "",
     sshKeyPath: profile.sshKeyPath ?? "",

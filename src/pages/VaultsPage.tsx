@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { Credential, SshProfile } from "../types";
 import { EmptyState, ErrorBanner, IconButton } from "../components/ui";
+import { groupTagColor, normalizeGroupName } from "../groupTags";
 
 export function VaultsPage({
   credentials,
@@ -54,7 +55,7 @@ export function VaultsPage({
               className="h-9 w-full min-w-0 rounded-md border border-[#3a4058] bg-[#42485f] pr-3 pl-9 text-sm outline-none placeholder:text-[#9aa0ba] focus:border-[#1e9bff]"
               value={hostSearch}
               onChange={(event) => onSearchChange(event.currentTarget.value)}
-              placeholder="Find a host or ssh user@hostname..."
+              placeholder="Find a group, host, or ssh user@hostname..."
             />
           </div>
         </div>
@@ -114,6 +115,8 @@ function HostsGrid({
   onNew: () => void;
   onSelect: (id: string) => void;
 }) {
+  const profileGroups = groupProfiles(profiles);
+
   if (!profiles.length) {
     return (
       <EmptyState
@@ -139,75 +142,156 @@ function HostsGrid({
           <span>New host</span>
         </button>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-2.5">
-        {profiles.map((profile) => {
-          const credential = profile.credentialId
-            ? credentials.find((item) => item.id === profile.credentialId)
-            : null;
-          const selected = selectedProfileId === profile.id;
-          return (
-            <article
-              key={profile.id}
-              data-preserve-host-selection
-              className={`group grid min-h-[60px] grid-cols-[84px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border p-2.5 ${
-                selected
-                  ? "border-[#1594ff] bg-[#282d43] shadow-[0_0_0_1px_#1594ff]"
-                  : "border-transparent bg-[#282d43] hover:border-[#454c68]"
-              }`}
-              onClick={() => onSelect(profile.id)}
-              onDoubleClick={() => onConnect(profile)}
-            >
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="grid size-10 place-items-center rounded-xl bg-[#ff6726] text-white hover:bg-[#ff7f47]"
-                  aria-label={`Connect ${profile.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onConnect(profile);
-                  }}
-                >
-                  <Terminal size={20} />
-                </button>
-                <button
-                  type="button"
-                  className="grid size-10 place-items-center rounded-xl bg-[#1f3a34] text-[#d8fff3] hover:bg-[#294b43]"
-                  aria-label={`Open files for ${profile.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenFiles(profile);
-                  }}
-                >
-                  <FolderSync size={19} />
-                </button>
-              </div>
-              <button type="button" className="min-w-0 text-left">
-                <span className="block truncate text-sm font-bold text-white">
-                  {profile.name}
-                </span>
-                <span className="block truncate text-xs text-[#9ca4bf]">
-                  ssh, {profile.username}
-                </span>
-                <span className="block truncate text-xs text-[#7f87a2]">
-                  {profile.username}@{profile.host}:{profile.port}
-                  {credential ? ` · ${credential.label}` : ""}
-                </span>
-              </button>
-              <div className="flex opacity-0 transition group-hover:opacity-100">
-                <IconButton label="Edit" onClick={() => onEdit(profile)}>
-                  <Pencil size={15} />
-                </IconButton>
-                <IconButton
-                  label="Delete"
-                  onClick={() => !isBusy && onDelete(profile.id)}
-                >
-                  <Trash2 size={15} />
-                </IconButton>
-              </div>
-            </article>
-          );
-        })}
+      <div className="grid gap-6">
+        {profileGroups.map((group) => (
+          <section key={group.name} className="grid gap-2.5">
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-bold"
+                style={groupTagStyle(group.name)}
+              >
+                <span className="truncate">{group.name}</span>
+              </span>
+              <span className="rounded-md border border-[#343a52] bg-[#252a3f] px-2 py-0.5 text-xs font-semibold text-[#9ca4bf]">
+                {group.profiles.length}
+              </span>
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-2.5">
+              {group.profiles.map((profile) => {
+                const credential = profile.credentialId
+                  ? credentials.find((item) => item.id === profile.credentialId)
+                  : null;
+                return (
+                  <HostCard
+                    key={profile.id}
+                    credential={credential ?? null}
+                    isBusy={isBusy}
+                    profile={profile}
+                    selected={selectedProfileId === profile.id}
+                    onConnect={onConnect}
+                    onDelete={onDelete}
+                    onEdit={onEdit}
+                    onOpenFiles={onOpenFiles}
+                    onSelect={onSelect}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
     </section>
   );
+}
+
+function HostCard({
+  credential,
+  isBusy,
+  profile,
+  selected,
+  onConnect,
+  onDelete,
+  onEdit,
+  onOpenFiles,
+  onSelect,
+}: {
+  credential: Credential | null;
+  isBusy: boolean;
+  profile: SshProfile;
+  selected: boolean;
+  onConnect: (profile: SshProfile) => void;
+  onDelete: (id: string) => void;
+  onEdit: (profile: SshProfile) => void;
+  onOpenFiles: (profile: SshProfile) => void;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <article
+      data-preserve-host-selection
+      className={`group grid min-h-[60px] grid-cols-[84px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border p-2.5 ${
+        selected
+          ? "border-[#1594ff] bg-[#282d43] shadow-[0_0_0_1px_#1594ff]"
+          : "border-transparent bg-[#282d43] hover:border-[#454c68]"
+      }`}
+      onClick={() => onSelect(profile.id)}
+      onDoubleClick={() => onConnect(profile)}
+    >
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="grid size-10 place-items-center rounded-xl bg-[#ff6726] text-white hover:bg-[#ff7f47]"
+          aria-label={`Connect ${profile.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onConnect(profile);
+          }}
+        >
+          <Terminal size={20} />
+        </button>
+        <button
+          type="button"
+          className="grid size-10 place-items-center rounded-xl bg-[#1f3a34] text-[#d8fff3] hover:bg-[#294b43]"
+          aria-label={`Open files for ${profile.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenFiles(profile);
+          }}
+        >
+          <FolderSync size={19} />
+        </button>
+      </div>
+      <button type="button" className="min-w-0 text-left">
+        <span className="block truncate text-sm font-bold text-white">
+          {profile.name}
+        </span>
+        <span className="block truncate text-xs text-[#9ca4bf]">
+          ssh, {profile.username}
+        </span>
+        <span className="block truncate text-xs text-[#7f87a2]">
+          {profile.username}@{profile.host}:{profile.port}
+          {credential ? ` · ${credential.label}` : ""}
+        </span>
+      </button>
+      <div className="flex opacity-0 transition group-hover:opacity-100">
+        <IconButton label="Edit" onClick={() => onEdit(profile)}>
+          <Pencil size={15} />
+        </IconButton>
+        <IconButton label="Delete" onClick={() => !isBusy && onDelete(profile.id)}>
+          <Trash2 size={15} />
+        </IconButton>
+      </div>
+    </article>
+  );
+}
+
+function groupProfiles(profiles: SshProfile[]) {
+  const groups: ProfileGroup[] = [];
+  const groupByName = new Map<string, ProfileGroup>();
+
+  for (const profile of profiles) {
+    const groupName = normalizeGroupName(profile.group);
+    let group = groupByName.get(groupName);
+    if (!group) {
+      group = { name: groupName, profiles: [] };
+      groupByName.set(groupName, group);
+      groups.push(group);
+    }
+    group.profiles.push(profile);
+  }
+
+  return groups;
+}
+
+interface ProfileGroup {
+  name: string;
+  profiles: SshProfile[];
+}
+
+function groupTagStyle(group: string) {
+  const color = groupTagColor(group);
+  return {
+    backgroundColor: color.background,
+    borderColor: color.border,
+    color: color.text,
+  };
 }
