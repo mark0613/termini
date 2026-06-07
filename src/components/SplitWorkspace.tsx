@@ -2,10 +2,14 @@ import type { CSSProperties } from "react";
 import type { TerminalThemeConfig } from "../terminalThemes";
 import type {
   SplitNodeState,
-  TerminalPaneState,
+  SftpPanelSide,
+  SftpSortField,
+  WorkspacePaneState,
   WorkspaceDropSide,
   WorkspaceNode,
 } from "../terminalTree";
+import type { RemoteFileEntry, SftpTransferInfo } from "../types";
+import { SftpPane } from "./SftpPane";
 import { TerminalPane } from "./TerminalPane";
 
 export interface WorkspaceDropPreviewState {
@@ -20,9 +24,47 @@ interface SplitWorkspaceProps {
   activeTheme: TerminalThemeConfig;
   dropPreview: WorkspaceDropPreviewState | null;
   terminalFontSize: number;
+  sftpTransfers: SftpTransferInfo[];
   onFocusPane: (paneId: string) => void;
   onPaneReady: (paneId: string, cols: number, rows: number) => void;
   onReconnectPane: (paneId: string, cols: number, rows: number) => void;
+  onSftpNavigate: (paneId: string, side: SftpPanelSide, path: string) => void;
+  onSftpPaneReady: (paneId: string) => void;
+  onSftpRefresh: (paneId: string, side: SftpPanelSide) => void;
+  onSftpSelect: (
+    paneId: string,
+    side: SftpPanelSide,
+    path: string | null,
+  ) => void;
+  onSftpSort: (
+    paneId: string,
+    side: SftpPanelSide,
+    field: SftpSortField,
+  ) => void;
+  onSftpToggleHidden: (paneId: string, side: SftpPanelSide) => void;
+  onSftpUpload: (
+    paneId: string,
+    entry: RemoteFileEntry,
+    remoteDirectoryPath?: string,
+  ) => void;
+  onSftpDownload: (
+    paneId: string,
+    entry: RemoteFileEntry,
+    localDirectoryPath?: string,
+  ) => void;
+  onSftpCreateFolder: (paneId: string, side: SftpPanelSide) => void;
+  onSftpRename: (
+    paneId: string,
+    side: SftpPanelSide,
+    entry: RemoteFileEntry,
+  ) => void;
+  onSftpDelete: (
+    paneId: string,
+    side: SftpPanelSide,
+    entry: RemoteFileEntry,
+  ) => void;
+  onOpenFilesFromTerminal: (paneId: string) => void;
+  onOpenTerminalFromSftp: (paneId: string) => void;
   onClosePane: (paneId: string) => void;
 }
 
@@ -33,9 +75,23 @@ export function SplitWorkspace({
   activeTheme,
   dropPreview,
   terminalFontSize,
+  sftpTransfers,
   onFocusPane,
   onPaneReady,
   onReconnectPane,
+  onSftpNavigate,
+  onSftpPaneReady,
+  onSftpRefresh,
+  onSftpSelect,
+  onSftpSort,
+  onSftpToggleHidden,
+  onSftpUpload,
+  onSftpDownload,
+  onSftpCreateFolder,
+  onSftpRename,
+  onSftpDelete,
+  onOpenFilesFromTerminal,
+  onOpenTerminalFromSftp,
   onClosePane,
 }: SplitWorkspaceProps) {
   const paneLayouts = collectPaneLayouts(node);
@@ -50,16 +106,43 @@ export function SplitWorkspace({
           data-workspace-drop-tab-id={tabId}
           style={style}
         >
-          <TerminalPane
-            pane={pane}
-            active={pane.id === activePaneId}
-            terminalTheme={activeTheme}
-            terminalFontSize={pane.fontSize ?? terminalFontSize}
-            onFocus={() => onFocusPane(pane.id)}
-            onReady={(cols, rows) => onPaneReady(pane.id, cols, rows)}
-            onReconnect={(cols, rows) => onReconnectPane(pane.id, cols, rows)}
-            onClose={() => onClosePane(pane.id)}
-          />
+          {pane.kind === "sftp" ? (
+            <SftpPane
+              pane={pane}
+              active={pane.id === activePaneId}
+              onClose={() => onClosePane(pane.id)}
+              onCreateFolder={(side) => onSftpCreateFolder(pane.id, side)}
+              onDelete={(side, entry) => onSftpDelete(pane.id, side, entry)}
+              onDownload={(entry, localDirectoryPath) =>
+                onSftpDownload(pane.id, entry, localDirectoryPath)
+              }
+              onFocus={() => onFocusPane(pane.id)}
+              onNavigate={(side, path) => onSftpNavigate(pane.id, side, path)}
+              onOpenTerminal={() => onOpenTerminalFromSftp(pane.id)}
+              onReady={() => onSftpPaneReady(pane.id)}
+              onRefresh={(side) => onSftpRefresh(pane.id, side)}
+              onRename={(side, entry) => onSftpRename(pane.id, side, entry)}
+              onSelect={(side, path) => onSftpSelect(pane.id, side, path)}
+              onSort={(side, field) => onSftpSort(pane.id, side, field)}
+              onToggleHidden={(side) => onSftpToggleHidden(pane.id, side)}
+              onUpload={(entry, remoteDirectoryPath) =>
+                onSftpUpload(pane.id, entry, remoteDirectoryPath)
+              }
+              transfers={sftpTransfers}
+            />
+          ) : (
+            <TerminalPane
+              pane={pane}
+              active={pane.id === activePaneId}
+              terminalTheme={activeTheme}
+              terminalFontSize={pane.fontSize ?? terminalFontSize}
+              onFocus={() => onFocusPane(pane.id)}
+              onReady={(cols, rows) => onPaneReady(pane.id, cols, rows)}
+              onReconnect={(cols, rows) => onReconnectPane(pane.id, cols, rows)}
+              onOpenFiles={() => onOpenFilesFromTerminal(pane.id)}
+              onClose={() => onClosePane(pane.id)}
+            />
+          )}
           {dropPreview?.targetPaneId === pane.id ? (
             <WorkspaceDropPreview side={dropPreview.side} />
           ) : null}
@@ -148,6 +231,6 @@ interface PaneBounds {
 }
 
 interface PaneLayout {
-  pane: TerminalPaneState;
+  pane: WorkspacePaneState;
   style: CSSProperties;
 }

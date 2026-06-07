@@ -1,21 +1,47 @@
-import type { SshProfile } from "./types";
+import type { RemoteFileEntry, SshProfile } from "./types";
 
 export type SplitDirection = "vertical" | "horizontal";
 export type WorkspaceDropSide = "left" | "right" | "top" | "bottom";
+export type SftpPanelSide = "local" | "remote";
+export type SftpSortField = "name" | "size" | "modified";
+export type SftpSortDirection = "asc" | "desc";
 
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
 export const WORKSPACE_TAB_TITLE = "Workspace";
 
-export interface TerminalPaneState {
+export interface WorkspacePaneBase {
   type: "pane";
   id: string;
+  kind: "terminal" | "sftp";
   profileId: string | null;
   sessionId: string | null;
   title: string;
   endpoint: string | null;
   status: string;
   message: string | null;
+}
+
+export interface TerminalPaneState extends WorkspacePaneBase {
+  kind: "terminal";
   fontSize: number;
+}
+
+export interface SftpPaneState extends WorkspacePaneBase {
+  kind: "sftp";
+  localPath: string;
+  localEntries: RemoteFileEntry[];
+  localSelectedPath: string | null;
+  localSortBy: SftpSortField;
+  localSortDirection: SftpSortDirection;
+  localShowHidden: boolean;
+  localStatus: string;
+  localMessage: string | null;
+  remotePath: string;
+  remoteEntries: RemoteFileEntry[];
+  remoteSelectedPath: string | null;
+  remoteSortBy: SftpSortField;
+  remoteSortDirection: SftpSortDirection;
+  remoteShowHidden: boolean;
 }
 
 export interface SplitNodeState {
@@ -25,7 +51,8 @@ export interface SplitNodeState {
   children: [WorkspaceNode, WorkspaceNode];
 }
 
-export type WorkspaceNode = TerminalPaneState | SplitNodeState;
+export type WorkspacePaneState = TerminalPaneState | SftpPaneState;
+export type WorkspaceNode = WorkspacePaneState | SplitNodeState;
 
 export interface TerminalTab {
   id: string;
@@ -35,13 +62,14 @@ export interface TerminalTab {
   workspace: boolean;
 }
 
-export function createPane(
+export function createTerminalPane(
   profile?: SshProfile,
   fontSize = DEFAULT_TERMINAL_FONT_SIZE,
 ): TerminalPaneState {
   return {
     type: "pane",
     id: crypto.randomUUID(),
+    kind: "terminal",
     profileId: profile?.id ?? null,
     sessionId: null,
     title: profile?.name ?? "Shell",
@@ -54,11 +82,49 @@ export function createPane(
   };
 }
 
-export function createTab(profile?: SshProfile): TerminalTab {
-  const pane = createPane(profile);
+export function createSftpPane(profile?: SshProfile): SftpPaneState {
+  return {
+    type: "pane",
+    id: crypto.randomUUID(),
+    kind: "sftp",
+    profileId: profile?.id ?? null,
+    sessionId: null,
+    title: profile ? `${profile.name} Files` : "Files",
+    endpoint: profile
+      ? `${profile.username}@${profile.host}:${profile.port}`
+      : null,
+    status: profile ? "pending" : "idle",
+    message: null,
+    localPath: "",
+    localEntries: [],
+    localSelectedPath: null,
+    localSortBy: "name",
+    localSortDirection: "asc",
+    localShowHidden: false,
+    localStatus: "pending",
+    localMessage: null,
+    remotePath: "",
+    remoteEntries: [],
+    remoteSelectedPath: null,
+    remoteSortBy: "name",
+    remoteSortDirection: "asc",
+    remoteShowHidden: false,
+  };
+}
+
+export function createTab(
+  profile?: SshProfile,
+  kind: WorkspacePaneState["kind"] = "terminal",
+): TerminalTab {
+  const pane =
+    kind === "sftp" ? createSftpPane(profile) : createTerminalPane(profile);
   return {
     id: crypto.randomUUID(),
-    title: profile?.name ?? "New tab",
+    title: profile
+      ? kind === "sftp"
+        ? `${profile.name} Files`
+        : profile.name
+      : "New tab",
     root: pane,
     activePaneId: pane.id,
     workspace: false,
@@ -72,7 +138,7 @@ export function canDragTabIntoWorkspace(tab: TerminalTab): boolean {
 export function updatePane(
   node: WorkspaceNode,
   paneId: string,
-  updater: (pane: TerminalPaneState) => TerminalPaneState,
+  updater: (pane: WorkspacePaneState) => WorkspacePaneState,
 ): WorkspaceNode {
   if (node.type === "pane") {
     return node.id === paneId ? updater(node) : node;
@@ -90,7 +156,7 @@ export function updatePane(
 export function updatePaneBySession(
   node: WorkspaceNode,
   sessionId: string,
-  updater: (pane: TerminalPaneState) => TerminalPaneState,
+  updater: (pane: WorkspacePaneState) => WorkspacePaneState,
 ): WorkspaceNode {
   if (node.type === "pane") {
     return node.sessionId === sessionId ? updater(node) : node;
@@ -108,7 +174,7 @@ export function updatePaneBySession(
 export function findPane(
   node: WorkspaceNode,
   paneId: string,
-): TerminalPaneState | null {
+): WorkspacePaneState | null {
   if (node.type === "pane") {
     return node.id === paneId ? node : null;
   }
@@ -116,11 +182,11 @@ export function findPane(
   return findPane(node.children[0], paneId) ?? findPane(node.children[1], paneId);
 }
 
-export function findFirstPane(node: WorkspaceNode): TerminalPaneState {
+export function findFirstPane(node: WorkspaceNode): WorkspacePaneState {
   return node.type === "pane" ? node : findFirstPane(node.children[0]);
 }
 
-export function collectPanes(node: WorkspaceNode): TerminalPaneState[] {
+export function collectPanes(node: WorkspaceNode): WorkspacePaneState[] {
   if (node.type === "pane") {
     return [node];
   }
@@ -138,8 +204,8 @@ export function splitPane(
       return { node, newPaneId: null };
     }
 
-    const newPane: TerminalPaneState = {
-      ...createPane(undefined, node.fontSize),
+    const newPane: WorkspacePaneState = {
+      ...clonePaneForSplit(node),
       profileId: node.profileId,
       title: node.title,
       endpoint: node.endpoint,
@@ -170,6 +236,24 @@ export function splitPane(
     node: { ...node, children: [node.children[0], second.node] },
     newPaneId: second.newPaneId,
   };
+}
+
+function clonePaneForSplit(pane: WorkspacePaneState): WorkspacePaneState {
+  if (pane.kind === "sftp") {
+    return {
+      ...createSftpPane(),
+      localPath: pane.localPath,
+      localSortBy: pane.localSortBy,
+      localSortDirection: pane.localSortDirection,
+      localShowHidden: pane.localShowHidden,
+      remotePath: pane.remotePath,
+      remoteSortBy: pane.remoteSortBy,
+      remoteSortDirection: pane.remoteSortDirection,
+      remoteShowHidden: pane.remoteShowHidden,
+    };
+  }
+
+  return createTerminalPane(undefined, pane.fontSize);
 }
 
 export function insertWorkspaceAtPane(
@@ -219,7 +303,7 @@ export function insertWorkspaceAtPane(
 export function removePane(
   node: WorkspaceNode,
   paneId: string,
-): { node: WorkspaceNode | null; removed: TerminalPaneState | null } {
+): { node: WorkspaceNode | null; removed: WorkspacePaneState | null } {
   if (node.type === "pane") {
     return node.id === paneId
       ? { node: null, removed: node }

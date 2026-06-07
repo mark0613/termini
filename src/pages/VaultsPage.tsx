@@ -1,4 +1,12 @@
-import { Pencil, Plus, Search, Server, Terminal, Trash2 } from "lucide-react";
+import {
+  FolderSync,
+  Pencil,
+  Plus,
+  Search,
+  Server,
+  Terminal,
+  Trash2,
+} from "lucide-react";
 import type { Credential, SshProfile } from "../types";
 import { EmptyState, ErrorBanner, IconButton } from "../components/ui";
 
@@ -12,6 +20,7 @@ export function VaultsPage({
   onConnect,
   onDelete,
   onEdit,
+  onOpenFiles,
   onNew,
   onSearchChange,
   onSelect,
@@ -26,6 +35,7 @@ export function VaultsPage({
   onConnect: (profile: SshProfile) => void;
   onDelete: (id: string) => void;
   onEdit: (profile: SshProfile) => void;
+  onOpenFiles: (profile: SshProfile) => void;
   onNew: () => void;
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
@@ -72,6 +82,7 @@ export function VaultsPage({
           onConnect={onConnect}
           onDelete={onDelete}
           onEdit={onEdit}
+          onOpenFiles={onOpenFiles}
           onNew={onNew}
           onSelect={onSelect}
         />
@@ -88,6 +99,7 @@ function HostsGrid({
   onConnect,
   onDelete,
   onEdit,
+  onOpenFiles,
   onNew,
   onSelect,
 }: {
@@ -98,6 +110,7 @@ function HostsGrid({
   onConnect: (profile: SshProfile) => void;
   onDelete: (id: string) => void;
   onEdit: (profile: SshProfile) => void;
+  onOpenFiles: (profile: SshProfile) => void;
   onNew: () => void;
   onSelect: (id: string) => void;
 }) {
@@ -136,7 +149,7 @@ function HostsGrid({
             <article
               key={profile.id}
               data-preserve-host-selection
-              className={`group grid min-h-[60px] grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border p-2.5 ${
+              className={`group grid min-h-[60px] grid-cols-[84px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border p-2.5 ${
                 selected
                   ? "border-[#1594ff] bg-[#282d43] shadow-[0_0_0_1px_#1594ff]"
                   : "border-transparent bg-[#282d43] hover:border-[#454c68]"
@@ -144,14 +157,30 @@ function HostsGrid({
               onClick={() => onSelect(profile.id)}
               onDoubleClick={() => onConnect(profile)}
             >
-              <button
-                type="button"
-                className="grid size-10 place-items-center rounded-xl bg-[#ff6726] text-white"
-                aria-label={`Connect ${profile.name}`}
-                onClick={() => onConnect(profile)}
-              >
-                <Terminal size={20} />
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="grid size-10 place-items-center rounded-xl bg-[#ff6726] text-white hover:bg-[#ff7f47]"
+                  aria-label={`Connect ${profile.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onConnect(profile);
+                  }}
+                >
+                  <Terminal size={20} />
+                </button>
+                <button
+                  type="button"
+                  className="grid size-10 place-items-center rounded-xl bg-[#1f3a34] text-[#d8fff3] hover:bg-[#294b43]"
+                  aria-label={`Open files for ${profile.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenFiles(profile);
+                  }}
+                >
+                  <FolderSync size={19} />
+                </button>
+              </div>
               <button type="button" className="min-w-0 text-left">
                 <span className="block truncate text-sm font-bold text-white">
                   {profile.name}

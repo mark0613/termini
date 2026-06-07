@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   KeyRound,
+  FolderSync,
   Plug,
   RefreshCw,
   Rocket,
@@ -65,6 +66,7 @@ interface TerminalPaneProps {
   onFocus: () => void;
   onReady: (cols: number, rows: number) => void;
   onReconnect: (cols: number, rows: number) => void;
+  onOpenFiles: () => void;
   onClose: () => void;
 }
 
@@ -76,6 +78,7 @@ export function TerminalPane({
   onFocus,
   onReady,
   onReconnect,
+  onOpenFiles,
   onClose,
 }: TerminalPaneProps) {
   const paneRef = useRef<HTMLDivElement | null>(null);
@@ -533,6 +536,17 @@ export function TerminalPane({
         <div className="absolute left-4 bottom-4 max-w-[70%] rounded-md border border-[#334353] bg-[#151b22] px-3 py-2 text-xs text-[#8fa1b2]">
           {pane.message}
         </div>
+      ) : null}
+      {pane.profileId && pane.status === "connected" && !showConnectionOverlay && !showRecoveryOverlay ? (
+        <button
+          type="button"
+          aria-label="Open SFTP files"
+          title="Open SFTP files"
+          className="absolute top-3 right-3 z-30 grid size-8 place-items-center rounded-md border border-[#2b3044] bg-[#151b22]/92 text-[#d5daf0] opacity-70 shadow-lg hover:bg-[#252a3f] hover:text-white hover:opacity-100"
+          onClick={onOpenFiles}
+        >
+          <FolderSync size={16} />
+        </button>
       ) : null}
     </div>
   );

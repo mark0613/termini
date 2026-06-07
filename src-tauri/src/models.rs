@@ -175,6 +175,102 @@ pub struct SshSessionInfo {
     pub credential_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectSftpInput {
+    pub session_id: String,
+    pub profile_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpSessionInput {
+    pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpPathInput {
+    pub session_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpRenameInput {
+    pub session_id: String,
+    pub old_path: String,
+    pub new_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpTransferInput {
+    pub session_id: String,
+    pub local_path: String,
+    pub remote_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPathInput {
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalRenameInput {
+    pub old_path: String,
+    pub new_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpSessionInfo {
+    pub session_id: String,
+    pub profile_id: String,
+    pub credential_id: Option<String>,
+    pub home_path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteFileEntry {
+    pub name: String,
+    pub path: String,
+    pub kind: String,
+    pub size: Option<u64>,
+    pub permissions: Option<u32>,
+    pub modified_at: Option<String>,
+    pub accessed_at: Option<String>,
+    pub user: Option<String>,
+    pub group: Option<String>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpStatusEvent {
+    pub session_id: String,
+    pub status: String,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpTransferInfo {
+    pub transfer_id: String,
+    pub session_id: String,
+    pub direction: String,
+    pub source_path: String,
+    pub destination_path: String,
+    pub bytes_transferred: u64,
+    pub bytes_total: Option<u64>,
+    pub status: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SshOutputEvent {

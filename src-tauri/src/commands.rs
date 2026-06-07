@@ -5,9 +5,11 @@ use crate::{
     models::{
         ConnectSshInput, CreateCredentialInput, CreateProfileInput, CreateTerminalThemeInput,
         CreateVaultInput, Credential, ExportVaultInput, ImportVaultInput, ImportVaultResult,
-        SetActiveTerminalThemeInput, SshProfile, SshResizeInput, SshSessionInfo, SshSessionInput,
-        SshWriteInput, TerminalTheme, UpdateCredentialInput, UpdateProfileInput, UpdateVaultInput,
-        Vault,
+        LocalPathInput, LocalRenameInput, RemoteFileEntry, SetActiveTerminalThemeInput,
+        SftpPathInput, SftpRenameInput, SftpSessionInfo, SftpSessionInput, SftpTransferInfo,
+        SftpTransferInput, SshProfile, SshResizeInput, SshSessionInfo, SshSessionInput,
+        SshWriteInput, TerminalTheme, UpdateCredentialInput, UpdateProfileInput,
+        UpdateVaultInput, Vault,
     },
     state::AppState,
 };
@@ -249,4 +251,137 @@ pub async fn send_profile_password(
     .await;
 
     command_result(result)
+}
+
+#[tauri::command]
+pub async fn connect_sftp(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    input: crate::models::ConnectSftpInput,
+) -> Result<SftpSessionInfo, String> {
+    let result = async {
+        let profile = state.storage.get_profile(&input.profile_id)?;
+        let password = match &profile.credential_id {
+            Some(credential_id) => Some(state.storage.get_password(credential_id)?),
+            None => None,
+        };
+        state
+            .sftp
+            .connect(app, input.session_id, profile, password)
+            .await
+    }
+    .await;
+
+    command_result(result)
+}
+
+#[tauri::command]
+pub async fn disconnect_sftp(
+    state: State<'_, AppState>,
+    input: SftpSessionInput,
+) -> Result<(), String> {
+    command_result(state.sftp.disconnect(&input.session_id).await)
+}
+
+#[tauri::command]
+pub async fn sftp_read_dir(
+    state: State<'_, AppState>,
+    input: SftpPathInput,
+) -> Result<Vec<RemoteFileEntry>, String> {
+    command_result(state.sftp.read_dir(&input.session_id, input.path).await)
+}
+
+#[tauri::command]
+pub async fn sftp_stat(
+    state: State<'_, AppState>,
+    input: SftpPathInput,
+) -> Result<RemoteFileEntry, String> {
+    command_result(state.sftp.stat(&input.session_id, input.path).await)
+}
+
+#[tauri::command]
+pub async fn sftp_create_dir(
+    state: State<'_, AppState>,
+    input: SftpPathInput,
+) -> Result<(), String> {
+    command_result(state.sftp.create_dir(&input.session_id, input.path).await)
+}
+
+#[tauri::command]
+pub async fn sftp_rename(state: State<'_, AppState>, input: SftpRenameInput) -> Result<(), String> {
+    command_result(
+        state
+            .sftp
+            .rename(&input.session_id, input.old_path, input.new_path)
+            .await,
+    )
+}
+
+#[tauri::command]
+pub async fn sftp_delete_file(
+    state: State<'_, AppState>,
+    input: SftpPathInput,
+) -> Result<(), String> {
+    command_result(state.sftp.delete_file(&input.session_id, input.path).await)
+}
+
+#[tauri::command]
+pub async fn sftp_delete_dir(
+    state: State<'_, AppState>,
+    input: SftpPathInput,
+) -> Result<(), String> {
+    command_result(state.sftp.delete_dir(&input.session_id, input.path).await)
+}
+
+#[tauri::command]
+pub async fn sftp_upload_file(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    input: SftpTransferInput,
+) -> Result<SftpTransferInfo, String> {
+    command_result(
+        state
+            .sftp
+            .upload_file(app, &input.session_id, input.local_path, input.remote_path)
+            .await,
+    )
+}
+
+#[tauri::command]
+pub async fn sftp_download_file(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    input: SftpTransferInput,
+) -> Result<SftpTransferInfo, String> {
+    command_result(
+        state
+            .sftp
+            .download_file(app, &input.session_id, input.remote_path, input.local_path)
+            .await,
+    )
+}
+
+#[tauri::command]
+pub async fn local_read_dir(input: LocalPathInput) -> Result<Vec<RemoteFileEntry>, String> {
+    command_result(crate::local_fs::read_dir(input.path).await)
+}
+
+#[tauri::command]
+pub async fn local_create_dir(input: LocalPathInput) -> Result<(), String> {
+    command_result(crate::local_fs::create_dir(input.path).await)
+}
+
+#[tauri::command]
+pub async fn local_rename(input: LocalRenameInput) -> Result<(), String> {
+    command_result(crate::local_fs::rename(input.old_path, input.new_path).await)
+}
+
+#[tauri::command]
+pub async fn local_delete_file(input: LocalPathInput) -> Result<(), String> {
+    command_result(crate::local_fs::delete_file(input.path).await)
+}
+
+#[tauri::command]
+pub async fn local_delete_dir(input: LocalPathInput) -> Result<(), String> {
+    command_result(crate::local_fs::delete_dir(input.path).await)
 }

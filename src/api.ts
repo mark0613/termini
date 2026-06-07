@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Credential,
   ImportVaultResult,
+  RemoteFileEntry,
+  SftpSessionInfo,
+  SftpTransferInfo,
   SshSessionInfo,
   SshProfile,
   TerminalTheme,
@@ -148,4 +151,76 @@ export function disconnectSsh(sessionId: string) {
 
 export function sendProfilePassword(sessionId: string) {
   return invoke<void>("send_profile_password", { input: { sessionId } });
+}
+
+export function connectSftp(input: { sessionId: string; profileId: string }) {
+  return invoke<SftpSessionInfo>("connect_sftp", { input });
+}
+
+export function disconnectSftp(sessionId: string) {
+  return invoke<void>("disconnect_sftp", { input: { sessionId } });
+}
+
+export function sftpReadDir(input: { sessionId: string; path: string }) {
+  return invoke<RemoteFileEntry[]>("sftp_read_dir", { input });
+}
+
+export function sftpStat(input: { sessionId: string; path: string }) {
+  return invoke<RemoteFileEntry>("sftp_stat", { input });
+}
+
+export function sftpCreateDir(input: { sessionId: string; path: string }) {
+  return invoke<void>("sftp_create_dir", { input });
+}
+
+export function sftpRename(input: {
+  sessionId: string;
+  oldPath: string;
+  newPath: string;
+}) {
+  return invoke<void>("sftp_rename", { input });
+}
+
+export function sftpDeleteFile(input: { sessionId: string; path: string }) {
+  return invoke<void>("sftp_delete_file", { input });
+}
+
+export function sftpDeleteDir(input: { sessionId: string; path: string }) {
+  return invoke<void>("sftp_delete_dir", { input });
+}
+
+export function sftpUploadFile(input: {
+  sessionId: string;
+  localPath: string;
+  remotePath: string;
+}) {
+  return invoke<SftpTransferInfo>("sftp_upload_file", { input });
+}
+
+export function sftpDownloadFile(input: {
+  sessionId: string;
+  localPath: string;
+  remotePath: string;
+}) {
+  return invoke<SftpTransferInfo>("sftp_download_file", { input });
+}
+
+export function localReadDir(input: { path: string }) {
+  return invoke<RemoteFileEntry[]>("local_read_dir", { input });
+}
+
+export function localCreateDir(input: { path: string }) {
+  return invoke<void>("local_create_dir", { input });
+}
+
+export function localRename(input: { oldPath: string; newPath: string }) {
+  return invoke<void>("local_rename", { input });
+}
+
+export function localDeleteFile(input: { path: string }) {
+  return invoke<void>("local_delete_file", { input });
+}
+
+export function localDeleteDir(input: { path: string }) {
+  return invoke<void>("local_delete_dir", { input });
 }

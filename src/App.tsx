@@ -1,4 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { basename, homeDir, join } from "@tauri-apps/api/path";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
@@ -35,6 +36,7 @@ import {
   WORKSPACE_TAB_TITLE,
   canDragTabIntoWorkspace,
   collectPanes,
+  createSftpPane,
   createTab,
   findFirstPane,
   findPane,
@@ -42,12 +44,23 @@ import {
   removePane,
   splitPane,
   type SplitDirection,
+  type SftpPanelSide,
+  type SftpSortField,
   type TerminalTab,
+  type WorkspacePaneState,
   type WorkspaceDropSide,
   updatePane,
   updatePaneBySession,
 } from "./terminalTree";
-import type { Credential, SshProfile, SshStatusEvent, Vault } from "./types";
+import type {
+  Credential,
+  RemoteFileEntry,
+  SftpStatusEvent,
+  SftpTransferInfo,
+  SshProfile,
+  SshStatusEvent,
+  Vault,
+} from "./types";
 
 const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
 const minTerminalFontSize = 9;
@@ -91,6 +104,7 @@ function App() {
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
+  const [sftpTransfers, setSftpTransfers] = useState<SftpTransferInfo[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [dropPreview, setDropPreview] = useState<WorkspaceDropPreview | null>(
     null,
@@ -114,8 +128,7 @@ function App() {
     if (!activeTab) return DEFAULT_TERMINAL_FONT_SIZE;
 
     return (
-      findPane(activeTab.root, activeTab.activePaneId)?.fontSize ??
-      DEFAULT_TERMINAL_FONT_SIZE
+      getTerminalPaneFontSize(findPane(activeTab.root, activeTab.activePaneId))
     );
   }, [activeTab]);
   const activeTerminalTheme = useMemo(
@@ -152,11 +165,50 @@ function App() {
       setTabs((current) =>
         current.map((tab) => ({
           ...tab,
-          root: updatePaneBySession(tab.root, event.payload.sessionId, (pane) => ({
-            ...pane,
-            status: event.payload.status,
-            message: event.payload.message,
-          })),
+          root: updatePaneBySession(tab.root, event.payload.sessionId, (pane) =>
+            pane.kind === "terminal"
+              ? {
+                  ...pane,
+                  status: event.payload.status,
+                  message: event.payload.message,
+                }
+              : pane,
+          ),
+        })),
+      );
+    }).then((handler) => {
+      unlisten = handler;
+    });
+
+    return () => unlisten?.();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    void listen<SftpTransferInfo>("sftp-transfer", (event) => {
+      setSftpTransfers((current) => upsertSftpTransfer(current, event.payload));
+    }).then((handler) => {
+      unlisten = handler;
+    });
+
+    return () => unlisten?.();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    void listen<SftpStatusEvent>("sftp-status", (event) => {
+      setTabs((current) =>
+        current.map((tab) => ({
+          ...tab,
+          root: updatePaneBySession(tab.root, event.payload.sessionId, (pane) =>
+            pane.kind === "sftp"
+              ? {
+                  ...pane,
+                  status: event.payload.status,
+                  message: event.payload.message,
+                }
+              : pane,
+          ),
         })),
       );
     }).then((handler) => {
@@ -355,10 +407,14 @@ function App() {
 
         return {
           ...tab,
-          root: updatePane(tab.root, tab.activePaneId, (pane) => ({
-            ...pane,
-            fontSize: clampTerminalFontSize(pane.fontSize + delta),
-          })),
+          root: updatePane(tab.root, tab.activePaneId, (pane) =>
+            pane.kind === "terminal"
+              ? {
+                  ...pane,
+                  fontSize: clampTerminalFontSize(pane.fontSize + delta),
+                }
+              : pane,
+          ),
         };
       }),
     );
@@ -371,16 +427,36 @@ function App() {
     setActivePage("session");
   }
 
+  function openSftpProfile(profile: SshProfile) {
+    const tab = createTab(profile, "sftp");
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    setActivePage("session");
+  }
+
   async function handlePaneReady(paneId: string, cols: number, rows: number) {
     const pane = findPaneInOpenTabs(paneId);
-    if (!pane?.profileId || pane.sessionId || pane.status !== "pending") return;
+    if (
+      !pane?.profileId ||
+      pane.kind !== "terminal" ||
+      pane.sessionId ||
+      pane.status !== "pending"
+    ) {
+      return;
+    }
 
     await connectPane(paneId, cols, rows);
   }
 
   async function reconnectPane(paneId: string, cols: number, rows: number) {
     const pane = findPaneInOpenTabs(paneId);
-    if (!pane?.profileId || !isRecoverableSshStatus(pane.status)) return;
+    if (
+      !pane?.profileId ||
+      pane.kind !== "terminal" ||
+      !isRecoverableSshStatus(pane.status)
+    ) {
+      return;
+    }
 
     await connectPane(paneId, cols, rows);
   }
@@ -389,7 +465,7 @@ function App() {
     if (connectingPaneIdsRef.current.has(paneId)) return;
 
     const pane = findPaneInOpenTabs(paneId);
-    if (!pane?.profileId) return;
+    if (!pane?.profileId || pane.kind !== "terminal") return;
 
     connectingPaneIdsRef.current.add(paneId);
     const previousSessionId = pane.sessionId;
@@ -430,17 +506,535 @@ function App() {
     }
   }
 
+  async function handleSftpPaneReady(paneId: string) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane || pane.kind !== "sftp") return;
+
+    const tasks: Promise<void>[] = [];
+    if (pane.localStatus === "pending" || !pane.localPath) {
+      tasks.push(loadInitialLocalDirectory(paneId));
+    }
+    if (pane.profileId && pane.status === "pending") {
+      tasks.push(connectSftpPane(paneId));
+    }
+
+    await Promise.all(tasks);
+  }
+
+  async function connectSftpPane(paneId: string) {
+    if (connectingPaneIdsRef.current.has(paneId)) return;
+
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.profileId || pane.kind !== "sftp") return;
+
+    connectingPaneIdsRef.current.add(paneId);
+    const previousSessionId = pane.sessionId;
+    const sessionId = crypto.randomUUID();
+    updatePaneInTabs(paneId, (current) =>
+      current.kind === "sftp"
+        ? {
+            ...current,
+            sessionId,
+            status: "connecting",
+            message: "Connecting...",
+          }
+        : current,
+    );
+
+    if (previousSessionId) {
+      void api.disconnectSftp(previousSessionId).catch(() => {});
+    }
+
+    try {
+      const session = await api.connectSftp({
+        sessionId,
+        profileId: pane.profileId,
+      });
+      const path = session.homePath || ".";
+      updatePaneInTabs(paneId, (current) =>
+        current.kind === "sftp"
+          ? {
+              ...current,
+              sessionId: session.sessionId,
+              status: "loading",
+              message: null,
+              remotePath: path,
+              remoteEntries: [],
+              remoteSelectedPath: null,
+            }
+          : current,
+      );
+      await loadRemoteDirectoryForSession(paneId, session.sessionId, path);
+    } catch (err) {
+      updatePaneInTabs(paneId, (current) =>
+        current.kind === "sftp"
+          ? {
+              ...current,
+              sessionId,
+              status: "error",
+              message: getErrorMessage(err),
+            }
+          : current,
+      );
+    } finally {
+      connectingPaneIdsRef.current.delete(paneId);
+    }
+  }
+
+  async function loadInitialLocalDirectory(paneId: string) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane || pane.kind !== "sftp") return;
+
+    const path = pane.localPath || (await defaultLocalTransferPath());
+    await loadLocalDirectoryForPane(paneId, path);
+  }
+
+  async function loadSftpPanelDirectory(
+    paneId: string,
+    side: SftpPanelSide,
+    path: string,
+  ) {
+    if (side === "local") {
+      await loadLocalDirectoryForPane(paneId, path);
+      return;
+    }
+
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.sessionId || pane.kind !== "sftp") return;
+
+    await loadRemoteDirectoryForSession(paneId, pane.sessionId, path);
+  }
+
+  async function refreshSftpPanelDirectory(
+    paneId: string,
+    side: SftpPanelSide,
+  ) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane || pane.kind !== "sftp") return;
+
+    if (side === "local") {
+      await loadLocalDirectoryForPane(
+        paneId,
+        pane.localPath || (await defaultLocalTransferPath()),
+      );
+      return;
+    }
+
+    if (!pane.sessionId || pane.status === "error") {
+      await connectSftpPane(paneId);
+      return;
+    }
+
+    await loadRemoteDirectoryForSession(
+      paneId,
+      pane.sessionId,
+      pane.remotePath || ".",
+    );
+  }
+
+  async function loadLocalDirectoryForPane(paneId: string, path: string) {
+    updatePaneInTabs(paneId, (current) =>
+      current.kind === "sftp"
+        ? {
+            ...current,
+            localStatus: "loading",
+            localMessage: null,
+          }
+        : current,
+    );
+
+    try {
+      const entries = await api.localReadDir({ path });
+      updatePaneInTabs(paneId, (current) =>
+        current.kind === "sftp"
+          ? {
+              ...current,
+              localStatus: "connected",
+              localMessage: null,
+              localPath: path,
+              localEntries: entries,
+              localSelectedPath: null,
+            }
+          : current,
+      );
+    } catch (err) {
+      updatePaneInTabs(paneId, (current) =>
+        current.kind === "sftp"
+          ? {
+              ...current,
+              localStatus: "error",
+              localMessage: getErrorMessage(err),
+            }
+          : current,
+      );
+    }
+  }
+
+  async function loadRemoteDirectoryForSession(
+    paneId: string,
+    sessionId: string,
+    path: string,
+  ) {
+    updatePaneInTabs(paneId, (current) =>
+      current.kind === "sftp"
+        ? {
+            ...current,
+            status: "loading",
+            message: null,
+          }
+        : current,
+    );
+
+    try {
+      const entries = await api.sftpReadDir({ sessionId, path });
+      updatePaneInTabs(paneId, (current) =>
+        current.kind === "sftp"
+          ? {
+              ...current,
+              status: "connected",
+              message: null,
+              remotePath: path,
+              remoteEntries: entries,
+              remoteSelectedPath: null,
+            }
+          : current,
+      );
+    } catch (err) {
+      updatePaneInTabs(paneId, (current) =>
+        current.kind === "sftp"
+          ? {
+              ...current,
+              status: "error",
+              message: getErrorMessage(err),
+            }
+          : current,
+      );
+    }
+  }
+
+  function selectSftpEntry(
+    paneId: string,
+    side: SftpPanelSide,
+    path: string | null,
+  ) {
+    updatePaneInTabs(paneId, (current) =>
+      current.kind === "sftp"
+        ? side === "local"
+          ? {
+              ...current,
+              localSelectedPath: path,
+            }
+          : {
+              ...current,
+              remoteSelectedPath: path,
+            }
+        : current,
+    );
+  }
+
+  function sortSftpEntries(
+    paneId: string,
+    side: SftpPanelSide,
+    field: SftpSortField,
+  ) {
+    updatePaneInTabs(paneId, (current) => {
+      if (current.kind !== "sftp") return current;
+
+      if (side === "local") {
+        const sameField = current.localSortBy === field;
+        return {
+          ...current,
+          localSortBy: field,
+          localSortDirection:
+            sameField && current.localSortDirection === "asc" ? "desc" : "asc",
+        };
+      }
+
+      const sameField = current.remoteSortBy === field;
+      return {
+        ...current,
+        remoteSortBy: field,
+        remoteSortDirection:
+          sameField && current.remoteSortDirection === "asc" ? "desc" : "asc",
+      };
+    });
+  }
+
+  function toggleSftpHidden(paneId: string, side: SftpPanelSide) {
+    updatePaneInTabs(paneId, (current) =>
+      current.kind === "sftp"
+        ? side === "local"
+          ? {
+              ...current,
+              localShowHidden: !current.localShowHidden,
+            }
+          : {
+              ...current,
+              remoteShowHidden: !current.remoteShowHidden,
+            }
+        : current,
+    );
+  }
+
+  function openFilesFromTerminalPane(paneId: string) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.profileId || pane.kind !== "terminal") return;
+
+    const profile = profiles.find((item) => item.id === pane.profileId);
+    if (!profile) return;
+
+    insertPaneBeside(paneId, createSftpPane(profile), `${profile.name} Files`);
+  }
+
+  function openTerminalFromSftpPane(paneId: string) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.profileId || pane.kind !== "sftp") return;
+
+    const profile = profiles.find((item) => item.id === pane.profileId);
+    if (!profile) return;
+
+    const tab = createTab(profile);
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    setActivePage("session");
+  }
+
+  function insertPaneBeside(
+    paneId: string,
+    pane: WorkspacePaneState,
+    title?: string,
+  ) {
+    setTabs((current) =>
+      current.map((tab) => {
+        const targetPane = findPane(tab.root, paneId);
+        if (!targetPane) return tab;
+
+        if (targetPane.kind === "terminal") {
+          preserveTerminalPaneRuntime(targetPane.id);
+        }
+
+        const result = insertWorkspaceAtPane(tab.root, paneId, pane, "right");
+        if (!result.inserted) return tab;
+
+        return {
+          ...tab,
+          title:
+            title ??
+            (targetPane.kind === "sftp" || pane.kind === "sftp"
+              ? tab.title
+              : WORKSPACE_TAB_TITLE),
+          workspace: true,
+          root: result.node,
+          activePaneId: pane.id,
+        };
+      }),
+    );
+  }
+
+  async function createSftpFolder(paneId: string, side: SftpPanelSide) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane || pane.kind !== "sftp") return;
+
+    const name = window.prompt("Folder name");
+    const folderName = name?.trim();
+    if (!folderName) return;
+
+    try {
+      if (side === "local") {
+        await api.localCreateDir({
+          path: await join(pane.localPath || (await defaultLocalTransferPath()), folderName),
+        });
+      } else {
+        if (!pane.sessionId) return;
+        await api.sftpCreateDir({
+          sessionId: pane.sessionId,
+          path: joinRemotePath(pane.remotePath || ".", folderName),
+        });
+      }
+      await refreshSftpPanelDirectory(paneId, side);
+    } catch (err) {
+      setSftpPanelError(paneId, side, err);
+    }
+  }
+
+  async function renameSftpEntry(
+    paneId: string,
+    side: SftpPanelSide,
+    entry: RemoteFileEntry,
+  ) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane || pane.kind !== "sftp") return;
+
+    const name = window.prompt("Rename", entry.name);
+    const nextName = name?.trim();
+    if (!nextName || nextName === entry.name) return;
+
+    try {
+      if (side === "local") {
+        await api.localRename({
+          oldPath: entry.path,
+          newPath: await join(parentLocalPath(entry.path), nextName),
+        });
+      } else {
+        if (!pane.sessionId) return;
+        await api.sftpRename({
+          sessionId: pane.sessionId,
+          oldPath: entry.path,
+          newPath: joinRemotePath(parentRemotePath(entry.path), nextName),
+        });
+      }
+      await refreshSftpPanelDirectory(paneId, side);
+    } catch (err) {
+      setSftpPanelError(paneId, side, err);
+    }
+  }
+
+  async function deleteSftpEntry(
+    paneId: string,
+    side: SftpPanelSide,
+    entry: RemoteFileEntry,
+  ) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane || pane.kind !== "sftp") return;
+
+    const confirmed = await confirm(`Delete "${entry.name}"?`, {
+      title: side === "local" ? "Delete local item" : "Delete remote item",
+      kind: "warning",
+      okLabel: "Delete",
+      cancelLabel: "Cancel",
+    });
+    if (!confirmed) return;
+
+    try {
+      if (side === "local") {
+        if (entry.kind === "directory") {
+          await api.localDeleteDir({ path: entry.path });
+        } else {
+          await api.localDeleteFile({ path: entry.path });
+        }
+      } else {
+        if (!pane.sessionId) return;
+        if (entry.kind === "directory") {
+          await api.sftpDeleteDir({ sessionId: pane.sessionId, path: entry.path });
+        } else {
+          await api.sftpDeleteFile({ sessionId: pane.sessionId, path: entry.path });
+        }
+      }
+      await refreshSftpPanelDirectory(paneId, side);
+    } catch (err) {
+      setSftpPanelError(paneId, side, err);
+    }
+  }
+
+  async function uploadLocalFileToRemote(
+    paneId: string,
+    entry: RemoteFileEntry,
+    remoteDirectoryPath?: string,
+  ) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (
+      !pane?.sessionId ||
+      pane.kind !== "sftp" ||
+      entry.kind === "directory"
+    ) {
+      return;
+    }
+
+    try {
+      const remoteDirectory = remoteDirectoryPath || pane.remotePath || ".";
+      const fileName = entry.name || (await basename(entry.path));
+      const existingEntries = isSameRemotePath(remoteDirectory, pane.remotePath)
+        ? pane.remoteEntries
+        : await api.sftpReadDir({
+            sessionId: pane.sessionId,
+            path: remoteDirectory,
+          });
+      const remoteFileName = nextUniqueFileName(
+        fileName,
+        existingEntries.map((item) => item.name),
+      );
+
+      await api.sftpUploadFile({
+        sessionId: pane.sessionId,
+        localPath: entry.path,
+        remotePath: joinRemotePath(remoteDirectory, remoteFileName),
+      });
+      await refreshSftpPanelDirectory(paneId, "remote");
+    } catch (err) {
+      setSftpPanelError(paneId, "remote", err);
+    }
+  }
+
+  async function downloadRemoteFileToLocal(
+    paneId: string,
+    entry: RemoteFileEntry,
+    localDirectoryPath?: string,
+  ) {
+    const pane = findPaneInOpenTabs(paneId);
+    if (!pane?.sessionId || pane.kind !== "sftp" || entry.kind === "directory") {
+      return;
+    }
+
+    try {
+      const localDirectory =
+        localDirectoryPath || pane.localPath || (await defaultLocalTransferPath());
+      const existingEntries = isSameLocalPath(localDirectory, pane.localPath)
+        ? pane.localEntries
+        : await api.localReadDir({ path: localDirectory });
+      const localFileName = nextUniqueFileName(
+        entry.name,
+        existingEntries.map((item) => item.name),
+        true,
+      );
+
+      await api.sftpDownloadFile({
+        sessionId: pane.sessionId,
+        remotePath: entry.path,
+        localPath: await join(localDirectory, localFileName),
+      });
+      await refreshSftpPanelDirectory(paneId, "local");
+    } catch (err) {
+      setSftpPanelError(paneId, "local", err);
+    }
+  }
+
+  function setSftpPanelError(
+    paneId: string,
+    side: SftpPanelSide,
+    err: unknown,
+  ) {
+    updatePaneInTabs(paneId, (current) =>
+      current.kind === "sftp"
+        ? side === "local"
+          ? {
+              ...current,
+              localStatus: "error",
+              localMessage: getErrorMessage(err),
+            }
+          : {
+              ...current,
+              status: "error",
+              message: getErrorMessage(err),
+            }
+        : current,
+    );
+  }
+
   function splitActivePane(direction: SplitDirection) {
     if (!activeTab) return;
 
     setTabs((current) =>
       current.map((tab) => {
         if (tab.id !== activeTabId) return tab;
+        const activePane = findPane(tab.root, tab.activePaneId);
         const result = splitPane(tab.root, tab.activePaneId, direction);
         const splitCreated = Boolean(result.newPaneId);
         return {
           ...tab,
-          title: splitCreated ? WORKSPACE_TAB_TITLE : tab.title,
+          title:
+            splitCreated && activePane?.kind !== "sftp"
+              ? WORKSPACE_TAB_TITLE
+              : tab.title,
           workspace: splitCreated ? true : tab.workspace,
           root: result.node,
           activePaneId: result.newPaneId ?? tab.activePaneId,
@@ -558,7 +1152,7 @@ function App() {
       );
       if (!result.inserted) return current;
 
-      if (sourceTab.root.type === "pane") {
+      if (sourceTab.root.type === "pane" && sourceTab.root.kind === "terminal") {
         preserveTerminalPaneRuntime(sourceTab.root.id);
       }
 
@@ -569,7 +1163,7 @@ function App() {
         return [
           {
             ...tab,
-            title: WORKSPACE_TAB_TITLE,
+            title: mergedWorkspaceTitle(sourceTab, targetTab),
             workspace: true,
             root: result.node,
             activePaneId: sourceTab.activePaneId,
@@ -682,8 +1276,11 @@ function App() {
           continue;
         }
 
-        if (result.removed.sessionId) {
-          void api.disconnectSsh(result.removed.sessionId).catch(() => {});
+        disconnectPaneSession(result.removed);
+        if (result.removed.kind === "sftp") {
+          setSftpTransfers((current) =>
+            current.filter((transfer) => transfer.sessionId !== result.removed?.sessionId),
+          );
         }
 
         if (!result.node) continue;
@@ -692,7 +1289,11 @@ function App() {
         nextTabs.push({
           ...tab,
           title:
-            result.node.type === "pane" ? result.node.title : WORKSPACE_TAB_TITLE,
+            result.node.type === "pane"
+              ? result.node.title
+              : collectPanes(result.node).some((pane) => pane.kind === "sftp")
+                ? tab.title
+                : WORKSPACE_TAB_TITLE,
           workspace: result.node.type === "split",
           root: result.node,
           activePaneId: nextActive,
@@ -720,7 +1321,12 @@ function App() {
       if (tab) {
         for (const pane of collectPanes(tab.root)) {
           connectingPaneIdsRef.current.delete(pane.id);
-          if (pane.sessionId) void api.disconnectSsh(pane.sessionId).catch(() => {});
+          disconnectPaneSession(pane);
+          if (pane.kind === "sftp") {
+            setSftpTransfers((current) =>
+              current.filter((transfer) => transfer.sessionId !== pane.sessionId),
+            );
+          }
         }
       }
 
@@ -1121,6 +1727,7 @@ function App() {
               onConnect={connectProfile}
               onDelete={handleDeleteProfile}
               onEdit={openEditProfileDrawer}
+              onOpenFiles={openSftpProfile}
               onNew={openNewProfileDrawer}
               onSearchChange={setHostSearch}
               onSelect={setSelectedProfileId}
@@ -1181,10 +1788,12 @@ function App() {
         terminalFontSize={DEFAULT_TERMINAL_FONT_SIZE}
         themeReady={terminalThemesLoaded}
         profiles={profiles}
+        sftpTransfers={sftpTransfers}
         tabs={tabs}
         visible={activePage === "session"}
         onClosePane={closePane}
         onConnect={connectProfile}
+        onOpenFiles={openSftpProfile}
         onFocusPane={(tabId, paneId) =>
           setTabs((current) =>
             current.map((tab) =>
@@ -1196,6 +1805,35 @@ function App() {
         onReconnectPane={(paneId, cols, rows) => {
           void reconnectPane(paneId, cols, rows);
         }}
+        onSftpNavigate={(paneId, side, path) => {
+          void loadSftpPanelDirectory(paneId, side, path);
+        }}
+        onSftpPaneReady={(paneId) => {
+          void handleSftpPaneReady(paneId);
+        }}
+        onSftpRefresh={(paneId, side) => {
+          void refreshSftpPanelDirectory(paneId, side);
+        }}
+        onSftpSelect={selectSftpEntry}
+        onSftpSort={sortSftpEntries}
+        onSftpToggleHidden={toggleSftpHidden}
+        onSftpUpload={(paneId, entry, remoteDirectoryPath) => {
+          void uploadLocalFileToRemote(paneId, entry, remoteDirectoryPath);
+        }}
+        onSftpDownload={(paneId, entry, localDirectoryPath) => {
+          void downloadRemoteFileToLocal(paneId, entry, localDirectoryPath);
+        }}
+        onSftpCreateFolder={(paneId, side) => {
+          void createSftpFolder(paneId, side);
+        }}
+        onSftpRename={(paneId, side, entry) => {
+          void renameSftpEntry(paneId, side, entry);
+        }}
+        onSftpDelete={(paneId, side, entry) => {
+          void deleteSftpEntry(paneId, side, entry);
+        }}
+        onOpenFilesFromTerminal={openFilesFromTerminalPane}
+        onOpenTerminalFromSftp={openTerminalFromSftpPane}
       />
 
       {profileDrawerOpen ? (
@@ -1240,6 +1878,140 @@ function App() {
 
 function isRecoverableSshStatus(status: string) {
   return status === "error" || status === "disconnected" || status === "exited";
+}
+
+function getTerminalPaneFontSize(pane: WorkspacePaneState | null) {
+  return pane?.kind === "terminal" ? pane.fontSize : DEFAULT_TERMINAL_FONT_SIZE;
+}
+
+function mergedWorkspaceTitle(sourceTab: TerminalTab, targetTab: TerminalTab) {
+  if (collectPanes(sourceTab.root).some((pane) => pane.kind === "sftp")) {
+    return sourceTab.title;
+  }
+  if (collectPanes(targetTab.root).some((pane) => pane.kind === "sftp")) {
+    return targetTab.title;
+  }
+  return WORKSPACE_TAB_TITLE;
+}
+
+function disconnectPaneSession(pane: WorkspacePaneState) {
+  if (!pane.sessionId) return;
+
+  if (pane.kind === "sftp") {
+    void api.disconnectSftp(pane.sessionId).catch(() => {});
+    return;
+  }
+
+  void api.disconnectSsh(pane.sessionId).catch(() => {});
+}
+
+async function defaultLocalTransferPath(fileName?: string) {
+  try {
+    const homeRoot = await homeDir();
+    return fileName ? await join(homeRoot, fileName) : homeRoot;
+  } catch {
+    return fileName ? `~/${fileName}` : "~";
+  }
+}
+
+function joinRemotePath(basePath: string, name: string) {
+  const base = basePath.trim() || ".";
+  const child = name.trim().replace(/^\/+/, "");
+  if (!child) return base;
+  if (base === ".") return child;
+  if (base === "/") return `/${child}`;
+  return `${base.replace(/\/+$/, "")}/${child}`;
+}
+
+function parentRemotePath(path: string) {
+  const trimmed = path.trim().replace(/\/+$/, "");
+  if (!trimmed || trimmed === "." || trimmed === "/") return trimmed || ".";
+
+  const separatorIndex = trimmed.lastIndexOf("/");
+  if (separatorIndex <= 0) return separatorIndex === 0 ? "/" : ".";
+
+  return trimmed.slice(0, separatorIndex);
+}
+
+function parentLocalPath(path: string) {
+  const trimmed = path.trim().replace(/[\\/]+$/, "");
+  if (!trimmed) return path;
+  if (/^[A-Za-z]:$/.test(trimmed)) return `${trimmed}\\`;
+  if (/^[A-Za-z]:[\\/]?$/.test(trimmed)) return trimmed;
+
+  const separatorIndex = Math.max(
+    trimmed.lastIndexOf("/"),
+    trimmed.lastIndexOf("\\"),
+  );
+  if (separatorIndex < 0) return trimmed;
+
+  const parent = trimmed.slice(0, separatorIndex);
+  if (/^[A-Za-z]:$/.test(parent)) return `${parent}\\`;
+  return parent || trimmed;
+}
+
+function isSameRemotePath(left: string, right: string) {
+  return normalizeRemotePath(left) === normalizeRemotePath(right);
+}
+
+function normalizeRemotePath(path: string) {
+  const trimmed = path.trim().replace(/\/+$/, "");
+  return trimmed || ".";
+}
+
+function isSameLocalPath(left: string, right: string) {
+  return normalizeLocalPath(left) === normalizeLocalPath(right);
+}
+
+function normalizeLocalPath(path: string) {
+  return path.trim().replace(/[\\/]+$/, "").toLowerCase();
+}
+
+function nextUniqueFileName(
+  fileName: string,
+  existingNames: string[],
+  caseInsensitive = false,
+) {
+  const names = new Set(
+    existingNames.map((name) => (caseInsensitive ? name.toLowerCase() : name)),
+  );
+  const normalize = (name: string) =>
+    caseInsensitive ? name.toLowerCase() : name;
+  if (!names.has(normalize(fileName))) return fileName;
+
+  const { stem, extension } = splitFileName(fileName);
+  for (let index = 1; index < 10000; index += 1) {
+    const nextName = `${stem} (${index})${extension}`;
+    if (!names.has(normalize(nextName))) return nextName;
+  }
+
+  return `${stem} (${crypto.randomUUID().slice(0, 8)})${extension}`;
+}
+
+function splitFileName(fileName: string) {
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0) {
+    return { stem: fileName || "file", extension: "" };
+  }
+
+  return {
+    stem: fileName.slice(0, dotIndex) || "file",
+    extension: fileName.slice(dotIndex),
+  };
+}
+
+function upsertSftpTransfer(
+  transfers: SftpTransferInfo[],
+  nextTransfer: SftpTransferInfo,
+) {
+  const index = transfers.findIndex(
+    (transfer) => transfer.transferId === nextTransfer.transferId,
+  );
+  if (index < 0) return [...transfers, nextTransfer].slice(-20);
+
+  const next = transfers.slice();
+  next[index] = nextTransfer;
+  return next;
 }
 
 interface WorkspaceDropTarget {

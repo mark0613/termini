@@ -1,9 +1,12 @@
 mod commands;
 mod crypto;
 mod error;
+mod local_fs;
 mod models;
 mod secrets;
+mod sftp;
 mod ssh;
+mod ssh_client;
 mod state;
 mod storage;
 
@@ -49,6 +52,21 @@ pub fn run() {
             commands::resize_ssh,
             commands::disconnect_ssh,
             commands::send_profile_password,
+            commands::connect_sftp,
+            commands::disconnect_sftp,
+            commands::sftp_read_dir,
+            commands::sftp_stat,
+            commands::sftp_create_dir,
+            commands::sftp_rename,
+            commands::sftp_delete_file,
+            commands::sftp_delete_dir,
+            commands::sftp_upload_file,
+            commands::sftp_download_file,
+            commands::local_read_dir,
+            commands::local_create_dir,
+            commands::local_rename,
+            commands::local_delete_file,
+            commands::local_delete_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,11 +1,16 @@
-import { Search, Terminal } from "lucide-react";
+import { FolderSync, Search, Terminal } from "lucide-react";
 import {
   SplitWorkspace,
   type WorkspaceDropPreviewState,
 } from "../components/SplitWorkspace";
 import type { TerminalThemeConfig } from "../terminalThemes";
-import { collectPanes, type TerminalTab } from "../terminalTree";
-import type { SshProfile, Vault } from "../types";
+import {
+  collectPanes,
+  type SftpPanelSide,
+  type SftpSortField,
+  type TerminalTab,
+} from "../terminalTree";
+import type { RemoteFileEntry, SftpTransferInfo, SshProfile, Vault } from "../types";
 
 export interface WorkspaceDropPreview extends WorkspaceDropPreviewState {
   targetTabId: string;
@@ -19,13 +24,28 @@ export function SessionPage({
   terminalFontSize,
   themeReady,
   profiles,
+  sftpTransfers,
   tabs,
   visible,
   onClosePane,
   onConnect,
   onFocusPane,
+  onOpenFiles,
   onPaneReady,
   onReconnectPane,
+  onSftpNavigate,
+  onSftpPaneReady,
+  onSftpRefresh,
+  onSftpSelect,
+  onSftpSort,
+  onSftpToggleHidden,
+  onSftpUpload,
+  onSftpDownload,
+  onSftpCreateFolder,
+  onSftpRename,
+  onSftpDelete,
+  onOpenFilesFromTerminal,
+  onOpenTerminalFromSftp,
 }: {
   activeTabId: string;
   activeVault: Vault | null;
@@ -34,13 +54,52 @@ export function SessionPage({
   terminalFontSize: number;
   themeReady: boolean;
   profiles: SshProfile[];
+  sftpTransfers: SftpTransferInfo[];
   tabs: TerminalTab[];
   visible: boolean;
   onClosePane: (paneId: string) => void;
   onConnect: (profile: SshProfile) => void;
   onFocusPane: (tabId: string, paneId: string) => void;
+  onOpenFiles: (profile: SshProfile) => void;
   onPaneReady: (paneId: string, cols: number, rows: number) => void;
   onReconnectPane: (paneId: string, cols: number, rows: number) => void;
+  onSftpNavigate: (paneId: string, side: SftpPanelSide, path: string) => void;
+  onSftpPaneReady: (paneId: string) => void;
+  onSftpRefresh: (paneId: string, side: SftpPanelSide) => void;
+  onSftpSelect: (
+    paneId: string,
+    side: SftpPanelSide,
+    path: string | null,
+  ) => void;
+  onSftpSort: (
+    paneId: string,
+    side: SftpPanelSide,
+    field: SftpSortField,
+  ) => void;
+  onSftpToggleHidden: (paneId: string, side: SftpPanelSide) => void;
+  onSftpUpload: (
+    paneId: string,
+    entry: RemoteFileEntry,
+    remoteDirectoryPath?: string,
+  ) => void;
+  onSftpDownload: (
+    paneId: string,
+    entry: RemoteFileEntry,
+    localDirectoryPath?: string,
+  ) => void;
+  onSftpCreateFolder: (paneId: string, side: SftpPanelSide) => void;
+  onSftpRename: (
+    paneId: string,
+    side: SftpPanelSide,
+    entry: RemoteFileEntry,
+  ) => void;
+  onSftpDelete: (
+    paneId: string,
+    side: SftpPanelSide,
+    entry: RemoteFileEntry,
+  ) => void;
+  onOpenFilesFromTerminal: (paneId: string) => void;
+  onOpenTerminalFromSftp: (paneId: string) => void;
 }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const emptyTab = activeTab
@@ -76,11 +135,25 @@ export function SessionPage({
                     dropPreview?.targetTabId === tab.id ? dropPreview : null
                   }
                   terminalFontSize={terminalFontSize}
+                  sftpTransfers={sftpTransfers}
                   node={tab.root}
                   onClosePane={onClosePane}
                   onFocusPane={(paneId) => onFocusPane(tab.id, paneId)}
                   onPaneReady={onPaneReady}
                   onReconnectPane={onReconnectPane}
+                  onSftpNavigate={onSftpNavigate}
+                  onSftpPaneReady={onSftpPaneReady}
+                  onSftpRefresh={onSftpRefresh}
+                  onSftpSelect={onSftpSelect}
+                  onSftpSort={onSftpSort}
+                  onSftpToggleHidden={onSftpToggleHidden}
+                  onSftpUpload={onSftpUpload}
+                  onSftpDownload={onSftpDownload}
+                  onSftpCreateFolder={onSftpCreateFolder}
+                  onSftpRename={onSftpRename}
+                  onSftpDelete={onSftpDelete}
+                  onOpenFilesFromTerminal={onOpenFilesFromTerminal}
+                  onOpenTerminalFromSftp={onOpenTerminalFromSftp}
                 />
               </div>
             );
@@ -91,6 +164,7 @@ export function SessionPage({
               activeVault={activeVault}
               profiles={profiles}
               onConnect={onConnect}
+              onOpenFiles={onOpenFiles}
             />
           </div>
         )}
@@ -103,10 +177,12 @@ function SessionEmptyState({
   activeVault,
   profiles,
   onConnect,
+  onOpenFiles,
 }: {
   activeVault: Vault | null;
   profiles: SshProfile[];
   onConnect: (profile: SshProfile) => void;
+  onOpenFiles: (profile: SshProfile) => void;
 }) {
   const recentProfiles = profiles.slice(0, 6);
   return (
@@ -124,15 +200,28 @@ function SessionEmptyState({
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
           {recentProfiles.map((profile) => (
-            <button
+            <article
               key={profile.id}
-              type="button"
-              className="grid grid-cols-[38px_minmax(0,1fr)] items-center gap-3 rounded-xl border border-[#2b3044] bg-[#171b2c] p-3 text-left hover:border-[#1e9bff]"
-              onClick={() => onConnect(profile)}
+              className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-3 rounded-xl border border-[#2b3044] bg-[#171b2c] p-3"
             >
-              <span className="grid size-10 place-items-center rounded-xl bg-[#ff6726]">
-                <Terminal size={18} />
-              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="grid size-9 place-items-center rounded-md bg-[#ff6726] text-white hover:bg-[#ff7f47]"
+                  aria-label={`Open terminal for ${profile.name}`}
+                  onClick={() => onConnect(profile)}
+                >
+                  <Terminal size={17} />
+                </button>
+                <button
+                  type="button"
+                  className="grid size-9 place-items-center rounded-md bg-[#1f3a34] text-[#d8fff3] hover:bg-[#294b43]"
+                  aria-label={`Open files for ${profile.name}`}
+                  onClick={() => onOpenFiles(profile)}
+                >
+                  <FolderSync size={17} />
+                </button>
+              </div>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-bold text-white">
                   {profile.name}
@@ -141,7 +230,7 @@ function SessionEmptyState({
                   {profile.username}@{profile.host}
                 </span>
               </span>
-            </button>
+            </article>
           ))}
         </div>
         {!recentProfiles.length ? (

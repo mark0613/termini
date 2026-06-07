@@ -22,6 +22,8 @@ pub enum AppError {
     Argon2(String),
     #[error("ssh error: {0}")]
     Ssh(String),
+    #[error("sftp error: {0}")]
+    Sftp(String),
     #[error("vault not found")]
     VaultNotFound,
     #[error("credential not found")]
@@ -43,5 +45,11 @@ impl From<argon2::Error> for AppError {
 impl From<russh::Error> for AppError {
     fn from(error: russh::Error) -> Self {
         Self::Ssh(error.to_string())
+    }
+}
+
+impl From<russh_sftp::client::error::Error> for AppError {
+    fn from(error: russh_sftp::client::error::Error) -> Self {
+        Self::Sftp(error.to_string())
     }
 }
