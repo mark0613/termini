@@ -1,2 +1,8 @@
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
+
+html,
+body,
+#root {
+  background: #191d2d;
+}

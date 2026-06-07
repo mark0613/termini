@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { basename, homeDir, join } from "@tauri-apps/api/path";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
@@ -65,6 +66,7 @@ import type {
 const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
 const minTerminalFontSize = 9;
 const maxTerminalFontSize = 24;
+const appWindow = getCurrentWindow();
 
 function getErrorMessage(err: unknown) {
   return err instanceof Error ? err.message : String(err);
@@ -115,6 +117,12 @@ function App() {
   const [error, setError] = useState("");
   const connectingPaneIdsRef = useRef(new Set<string>());
   const draggingTabIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      void appWindow.show().then(() => appWindow.setFocus());
+    });
+  }, []);
 
   const activeVault = useMemo(
     () => vaults.find((vault) => vault.id === activeVaultId) ?? null,
