@@ -119,8 +119,11 @@ function App() {
   const draggingTabIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // The window is already visible (visible: true in tauri.conf.json), painting
+    // the dark background + splash from index.html until React mounts. Once we're
+    // here the splash has been replaced, so just take focus.
     requestAnimationFrame(() => {
-      void appWindow.show().then(() => appWindow.setFocus());
+      void appWindow.setFocus();
     });
   }, []);
 
