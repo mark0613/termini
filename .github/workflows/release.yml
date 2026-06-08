@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - src-tauri/tauri.conf.json
+      - src-tauri/Cargo.toml
+      - .github/workflows/release.yml
+      - .github/scripts/detect-release-version.mjs
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  detect-version:
+    name: Detect version change
+    if: github.event_name == 'push'
+    runs-on: ubuntu-22.04
+    outputs:
+      should_release: ${{ steps.detect.outputs.should_release }}
+      version: ${{ steps.detect.outputs.version }}
+      previous_version: ${{ steps.detect.outputs.previous_version }}
+      reason: ${{ steps.detect.outputs.reason }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Detect release version
+        id: detect
+        run: node .github/scripts/detect-release-version.mjs
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+
+      - name: Report skipped release
+        if: steps.detect.outputs.should_release != 'true'
+        run: echo "${{ steps.detect.outputs.reason }}"
+
+  publish-tauri:
+    name: Publish Tauri (${{ matrix.platform }} ${{ matrix.args }})
+    needs: detect-version
+    if: always() && (github.event_name == 'release' || needs.detect-version.outputs.should_release == 'true')
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_target: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust_target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+            rust_target: ""
+          - platform: windows-latest
+            args: ""
+            rust_target: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install Rust stable
+        if: matrix.rust_target == ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust stable with target
+        if: matrix.rust_target != ''
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate signing secret
+        shell: pwsh
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw "Missing GitHub Actions secret: TAURI_SIGNING_PRIVATE_KEY"
+          }
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+      - name: Publish release
+        uses: tauri-apps/tauri-action@v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ github.event_name == 'release' && github.event.release.id || '' }}
+          tagName: ${{ github.event_name == 'release' && github.event.release.tag_name || 'v__VERSION__' }}
+          releaseName: ${{ github.event_name == 'release' && github.event.release.name || 'Termini v__VERSION__' }}
+          releaseDraft: ${{ github.event_name == 'release' && github.event.release.draft || false }}
+          prerelease: ${{ github.event_name == 'release' && github.event.release.prerelease || false }}
+          generateReleaseNotes: true
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+          tauriScript: pnpm tauri
+          args: ${{ matrix.args }}
