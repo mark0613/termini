@@ -1,7 +1,41 @@
-# Tauri + React + Typescript
+# Termini
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Termini is a lightweight Rust alternative to Termius for managing SSH hosts, opening terminal sessions, and moving files through SFTP from one focused desktop app.
 
-## Recommended IDE Setup
+## Features
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- Manage SSH host profiles in local vaults
+- Open interactive terminal sessions
+- Browse and transfer files with SFTP
+- Split workspaces into multiple terminal or file panes
+- Customize terminal themes
+- Export and import vault data
+
+## Tech Stack
+
+- Tauri 2
+- React 19
+- TypeScript
+- Vite
+- Rust
+- xterm.js
+
+## Getting Started
+
+Install dependencies:
+
+```bash
+pnpm install
+```
+
+Run the desktop app:
+
+```bash
+pnpm tauri dev
+```
+
+Build the desktop app:
+
+```bash
+pnpm tauri build
+```
