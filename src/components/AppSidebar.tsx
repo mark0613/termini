@@ -22,11 +22,13 @@ const settingsRailItems: Array<{
 export function AppSidebar({
   activePage,
   activeSettingsSection,
+  updateAvailable,
   onHostsClick,
   onSettingsSectionClick,
 }: {
   activePage: AppPage;
   activeSettingsSection: SettingsSection;
+  updateAvailable: boolean;
   onHostsClick: () => void;
   onSettingsSectionClick: (section: SettingsSection) => void;
 }) {
@@ -46,6 +48,7 @@ export function AppSidebar({
             active={activePage === "settings" && activeSettingsSection === item.id}
             icon={item.icon}
             label={item.label}
+            indicator={item.id === "about" && updateAvailable}
             onClick={() => onSettingsSectionClick(item.id)}
           />
         ))}
@@ -59,24 +62,35 @@ export function AppSidebar({
 function RailButton({
   active,
   icon: Icon,
+  indicator,
   label,
   onClick,
 }: {
   active: boolean;
   icon: LucideIcon;
+  indicator?: boolean;
   label: string;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      className={`flex h-9 items-center gap-3 rounded-md px-3 text-left text-sm font-semibold ${
+      className={`grid h-9 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-3 text-left text-sm font-semibold ${
         active ? "bg-[#464c65] text-white" : "text-white hover:bg-[#343a52]"
       }`}
       onClick={onClick}
     >
       <Icon size={16} />
       <span className="truncate">{label}</span>
+      {indicator ? (
+        <span
+          className="size-2 rounded-full bg-[#44d19d]"
+          aria-label={`${label} has updates`}
+          title="Update available"
+        />
+      ) : (
+        <span className="size-2" />
+      )}
     </button>
   );
 }

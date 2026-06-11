@@ -62,6 +62,7 @@ import type {
   SshStatusEvent,
   Vault,
 } from "./types";
+import { useAppUpdate } from "./useAppUpdate";
 
 const vaultFileFilters = [{ name: "Termini vault export", extensions: ["json"] }];
 const minTerminalFontSize = 9;
@@ -117,6 +118,7 @@ function App() {
   const [error, setError] = useState("");
   const connectingPaneIdsRef = useRef(new Set<string>());
   const draggingTabIdRef = useRef<string | null>(null);
+  const appUpdate = useAppUpdate();
 
   useEffect(() => {
     // The window is already visible (visible: true in tauri.conf.json), painting
@@ -147,6 +149,15 @@ function App() {
       terminalThemes.find((theme) => theme.id === activeTerminalThemeId) ??
       DEFAULT_TERMINAL_THEME,
     [activeTerminalThemeId, terminalThemes],
+  );
+  const activeSessionCount = useMemo(
+    () =>
+      tabs.reduce(
+        (count, tab) =>
+          count + collectPanes(tab.root).filter((pane) => pane.sessionId).length,
+        0,
+      ),
+    [tabs],
   );
   const profileGroupOptions = useMemo(
     () =>
@@ -1718,6 +1729,23 @@ function App() {
     }
   }
 
+  async function handleInstallUpdate() {
+    if (activeSessionCount > 0) {
+      const confirmed = await confirm(
+        "Installing the update will restart Termini and disconnect open sessions. Continue?",
+        {
+          title: "Install update",
+          kind: "warning",
+          okLabel: "Update",
+          cancelLabel: "Cancel",
+        },
+      );
+      if (!confirmed) return;
+    }
+
+    await appUpdate.installAndRelaunch();
+  }
+
   return (
     <main className="grid h-dvh w-full grid-rows-[50px_minmax(0,1fr)] overflow-hidden bg-[#191d2d] text-[#f4f6fb]">
       <AppHeader
@@ -1741,6 +1769,7 @@ function App() {
           <AppSidebar
             activePage={activePage}
             activeSettingsSection={activeSettingsSection}
+            updateAvailable={appUpdate.status === "available"}
             onHostsClick={() => setActivePage("vaults")}
             onSettingsSectionClick={(section) => {
               setActiveSettingsSection(section);
@@ -1768,6 +1797,7 @@ function App() {
             <SettingsPage
               activeSection={activeSettingsSection}
               activeVault={activeVault}
+              appUpdate={appUpdate}
               activeTerminalThemeId={activeTerminalThemeId}
               exportError={exportError}
               exportPassword={exportPassword}
@@ -1805,6 +1835,12 @@ function App() {
               onImportPathChange={(value) => {
                 setImportPath(value);
                 setImportError("");
+              }}
+              onCheckForUpdates={() => {
+                void appUpdate.checkForUpdates();
+              }}
+              onInstallUpdate={() => {
+                void handleInstallUpdate();
               }}
             />
           )}
