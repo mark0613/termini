@@ -64,6 +64,10 @@ export function AppHeader({
         className="flex min-w-0 flex-1 items-center gap-2"
         data-tab-reorder-list="true"
       >
+        <div className="flex h-8 shrink-0 select-none items-center gap-2 pr-2 text-sm font-semibold text-white">
+          <img src="/logo.png" alt="" className="size-7" aria-hidden="true" />
+          <span>Termini</span>
+        </div>
         <TopPageButton
           active={activePage === "vaults"}
           label="Vaults"
