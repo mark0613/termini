@@ -7,7 +7,7 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react";
-import type { Credential, SshProfile } from "../types";
+import type { Credential, HostGroup, SshProfile } from "../types";
 import { EmptyState, ErrorBanner, IconButton } from "../components/ui";
 import { groupTagColor, normalizeGroupName } from "../groupTags";
 
@@ -17,12 +17,14 @@ export function VaultsPage({
   hostSearch,
   isBusy,
   profiles,
+  hostGroups,
   selectedProfileId,
   onConnect,
   onDelete,
   onEdit,
   onOpenFiles,
   onNew,
+  onEditGroup,
   onSearchChange,
   onSelect,
   onClearSelection,
@@ -32,12 +34,14 @@ export function VaultsPage({
   hostSearch: string;
   isBusy: boolean;
   profiles: SshProfile[];
+  hostGroups: HostGroup[];
   selectedProfileId: string;
   onConnect: (profile: SshProfile) => void;
   onDelete: (id: string) => void;
   onEdit: (profile: SshProfile) => void;
   onOpenFiles: (profile: SshProfile) => void;
   onNew: () => void;
+  onEditGroup: (group: HostGroup) => void;
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
   onClearSelection: () => void;
@@ -79,12 +83,14 @@ export function VaultsPage({
           credentials={credentials}
           isBusy={isBusy}
           profiles={profiles}
+          hostGroups={hostGroups}
           selectedProfileId={selectedProfileId}
           onConnect={onConnect}
           onDelete={onDelete}
           onEdit={onEdit}
           onOpenFiles={onOpenFiles}
           onNew={onNew}
+          onEditGroup={onEditGroup}
           onSelect={onSelect}
         />
       </div>
@@ -96,26 +102,30 @@ function HostsGrid({
   credentials,
   isBusy,
   profiles,
+  hostGroups,
   selectedProfileId,
   onConnect,
   onDelete,
   onEdit,
   onOpenFiles,
   onNew,
+  onEditGroup,
   onSelect,
 }: {
   credentials: Credential[];
   isBusy: boolean;
   profiles: SshProfile[];
+  hostGroups: HostGroup[];
   selectedProfileId: string;
   onConnect: (profile: SshProfile) => void;
   onDelete: (id: string) => void;
   onEdit: (profile: SshProfile) => void;
   onOpenFiles: (profile: SshProfile) => void;
   onNew: () => void;
+  onEditGroup: (group: HostGroup) => void;
   onSelect: (id: string) => void;
 }) {
-  const profileGroups = groupProfiles(profiles);
+  const profileGroups = groupProfiles(profiles, hostGroups);
 
   if (!profiles.length) {
     return (
@@ -143,42 +153,57 @@ function HostsGrid({
         </button>
       </div>
       <div className="grid gap-6">
-        {profileGroups.map((group) => (
-          <section key={group.name} className="grid gap-2.5">
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-bold"
-                style={groupTagStyle(group.name)}
-              >
-                <span className="truncate">{group.name}</span>
-              </span>
-              <span className="rounded-md border border-[#343a52] bg-[#252a3f] px-2 py-0.5 text-xs font-semibold text-[#9ca4bf]">
-                {group.profiles.length}
-              </span>
-            </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-2.5">
-              {group.profiles.map((profile) => {
-                const credential = profile.credentialId
-                  ? credentials.find((item) => item.id === profile.credentialId)
-                  : null;
-                return (
-                  <HostCard
-                    key={profile.id}
-                    credential={credential ?? null}
-                    isBusy={isBusy}
-                    profile={profile}
-                    selected={selectedProfileId === profile.id}
-                    onConnect={onConnect}
-                    onDelete={onDelete}
-                    onEdit={onEdit}
-                    onOpenFiles={onOpenFiles}
-                    onSelect={onSelect}
-                  />
-                );
-              })}
-            </div>
-          </section>
-        ))}
+        {profileGroups.map((group) => {
+          const hostGroup = group.hostGroup;
+          return (
+            <section key={group.key} className="grid gap-2.5">
+              <div className="flex items-center gap-2">
+                {hostGroup ? (
+                  <button
+                    type="button"
+                    data-preserve-host-selection
+                    className="inline-flex h-7 max-w-full cursor-pointer items-center rounded-md border px-2 text-xs font-bold transition hover:brightness-110"
+                    style={groupTagStyle(group.name, hostGroup.colorId)}
+                    onClick={() => onEditGroup(hostGroup)}
+                  >
+                    <span className="truncate">{group.name}</span>
+                  </button>
+                ) : (
+                  <span
+                    className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-bold"
+                    style={groupTagStyle(group.name)}
+                  >
+                    <span className="truncate">{group.name}</span>
+                  </span>
+                )}
+                <span className="rounded-md border border-[#343a52] bg-[#252a3f] px-2 py-0.5 text-xs font-semibold text-[#9ca4bf]">
+                  {group.profiles.length}
+                </span>
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-2.5">
+                {group.profiles.map((profile) => {
+                  const credential = profile.credentialId
+                    ? credentials.find((item) => item.id === profile.credentialId)
+                    : null;
+                  return (
+                    <HostCard
+                      key={profile.id}
+                      credential={credential ?? null}
+                      isBusy={isBusy}
+                      profile={profile}
+                      selected={selectedProfileId === profile.id}
+                      onConnect={onConnect}
+                      onDelete={onDelete}
+                      onEdit={onEdit}
+                      onOpenFiles={onOpenFiles}
+                      onSelect={onSelect}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </section>
   );
@@ -264,16 +289,21 @@ function HostCard({
   );
 }
 
-function groupProfiles(profiles: SshProfile[]) {
+function groupProfiles(profiles: SshProfile[], hostGroups: HostGroup[]) {
   const groups: ProfileGroup[] = [];
-  const groupByName = new Map<string, ProfileGroup>();
+  const groupByKey = new Map<string, ProfileGroup>();
+  const groupsById = new Map(hostGroups.map((group) => [group.id, group]));
 
   for (const profile of profiles) {
-    const groupName = normalizeGroupName(profile.group);
-    let group = groupByName.get(groupName);
+    const hostGroup = profile.groupId
+      ? groupsById.get(profile.groupId) ?? null
+      : null;
+    const groupName = hostGroup?.label ?? normalizeGroupName(profile.group);
+    const key = hostGroup?.id ?? `fallback:${groupName}`;
+    let group = groupByKey.get(key);
     if (!group) {
-      group = { name: groupName, profiles: [] };
-      groupByName.set(groupName, group);
+      group = { key, name: groupName, hostGroup, profiles: [] };
+      groupByKey.set(key, group);
       groups.push(group);
     }
     group.profiles.push(profile);
@@ -283,12 +313,14 @@ function groupProfiles(profiles: SshProfile[]) {
 }
 
 interface ProfileGroup {
+  key: string;
   name: string;
+  hostGroup: HostGroup | null;
   profiles: SshProfile[];
 }
 
-function groupTagStyle(group: string) {
-  const color = groupTagColor(group);
+function groupTagStyle(group: string, colorId?: string | null) {
+  const color = groupTagColor(group, colorId);
   return {
     backgroundColor: color.background,
     borderColor: color.border,

@@ -13,14 +13,18 @@ use crate::{
     crypto::{decrypt_export_payload, encrypt_export_payload},
     error::{AppError, AppResult},
     models::{
-        Credential, ExportCredential, ExportFile, ExportPayload, ExportProfile,
-        ExportTerminalTheme, ExportVault, ImportVaultResult, SshProfile, TerminalTheme, Vault,
+        Credential, ExportCredential, ExportFile, ExportHostGroup, ExportPayload, ExportProfile,
+        ExportTerminalTheme, ExportVault, HostGroup, ImportVaultResult, SshProfile, TerminalTheme,
+        Vault,
     },
     secrets,
 };
 
 const DEFAULT_TERMINAL_THEME_ID: &str = "termini-default";
 const ACTIVE_TERMINAL_THEME_KEY: &str = "active_terminal_theme_id";
+const GROUP_COLOR_IDS: [&str; 8] = [
+    "green", "blue", "purple", "rose", "amber", "cyan", "orange", "mint",
+];
 
 pub struct Storage {
     conn: Mutex<Connection>,
@@ -180,13 +184,58 @@ impl Storage {
     pub fn list_profiles(&self, vault_id: &str) -> AppResult<Vec<SshProfile>> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at
-             FROM profiles
-             WHERE vault_id = ?1
-             ORDER BY COALESCE(group_name, ''), name",
+            "SELECT p.id, p.vault_id, p.credential_id, p.name, p.host, p.port, p.username,
+                    p.group_id, COALESCE(g.label, p.group_name), g.color_id, p.ssh_key_path,
+                    p.created_at, p.updated_at
+             FROM profiles p
+             LEFT JOIN host_groups g ON g.id = p.group_id
+             WHERE p.vault_id = ?1
+             ORDER BY COALESCE(g.label, p.group_name, ''), p.name",
         )?;
         let rows = stmt.query_map(params![vault_id], map_profile)?;
         collect_rows(rows)
+    }
+
+    pub fn list_host_groups(&self, vault_id: &str) -> AppResult<Vec<HostGroup>> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        self.list_host_groups_locked(&conn, vault_id)
+    }
+
+    pub fn update_host_group(
+        &self,
+        id: String,
+        label: String,
+        color_id: String,
+    ) -> AppResult<HostGroup> {
+        let label = clean_required(label, "group label")?;
+        let color_id = clean_color_id(color_id)?;
+        let updated_at = now();
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let existing = self.get_host_group_locked(&conn, &id)?;
+
+        let duplicate: Option<String> = conn
+            .query_row(
+                "SELECT id FROM host_groups WHERE vault_id = ?1 AND label = ?2 AND id != ?3",
+                params![existing.vault_id, label, id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if duplicate.is_some() {
+            return Err(AppError::InvalidInput(
+                "group label already exists".to_string(),
+            ));
+        }
+
+        conn.execute(
+            "UPDATE host_groups SET label = ?1, color_id = ?2, updated_at = ?3 WHERE id = ?4",
+            params![label, color_id, updated_at, id],
+        )?;
+        conn.execute(
+            "UPDATE profiles SET group_name = ?1, updated_at = ?2 WHERE group_id = ?3",
+            params![label, updated_at, id],
+        )?;
+
+        self.get_host_group_locked(&conn, &id)
     }
 
     pub fn create_profile(
@@ -210,11 +259,15 @@ impl Storage {
         let id = Uuid::new_v4().to_string();
         let now = now();
         let conn = self.conn.lock().expect("storage mutex poisoned");
+        let group_id = match group.as_deref() {
+            Some(group) => Some(self.get_or_create_host_group_locked(&conn, &vault_id, group)?),
+            None => None,
+        };
 
         conn.execute(
             "INSERT INTO profiles
-             (id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             (id, vault_id, credential_id, name, host, port, username, group_id, group_name, ssh_key_path, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 id,
                 vault_id,
@@ -223,6 +276,7 @@ impl Storage {
                 host,
                 i64::from(port),
                 username,
+                group_id,
                 group,
                 ssh_key_path,
                 now,
@@ -253,17 +307,24 @@ impl Storage {
         let ssh_key_path = clean_optional(ssh_key_path);
         let updated_at = now();
         let conn = self.conn.lock().expect("storage mutex poisoned");
+        let group_id = match group.as_deref() {
+            Some(group) => {
+                Some(self.get_or_create_host_group_locked(&conn, &existing.vault_id, group)?)
+            }
+            None => None,
+        };
 
         conn.execute(
             "UPDATE profiles
-             SET credential_id = ?1, name = ?2, host = ?3, port = ?4, username = ?5, group_name = ?6, ssh_key_path = ?7, updated_at = ?8
-             WHERE id = ?9",
+             SET credential_id = ?1, name = ?2, host = ?3, port = ?4, username = ?5, group_id = ?6, group_name = ?7, ssh_key_path = ?8, updated_at = ?9
+             WHERE id = ?10",
             params![
                 credential_id,
                 name,
                 host,
                 i64::from(port),
                 username,
+                group_id,
                 group,
                 ssh_key_path,
                 updated_at,
@@ -342,11 +403,7 @@ impl Storage {
             .as_deref()
             == Some(id.as_str())
         {
-            self.set_setting_locked(
-                &conn,
-                ACTIVE_TERMINAL_THEME_KEY,
-                DEFAULT_TERMINAL_THEME_ID,
-            )?;
+            self.set_setting_locked(&conn, ACTIVE_TERMINAL_THEME_KEY, DEFAULT_TERMINAL_THEME_ID)?;
         }
 
         Ok(())
@@ -357,6 +414,7 @@ impl Storage {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let vault = self.get_vault_locked(&conn, &vault_id)?;
         let credentials = self.list_credentials_locked(&conn, &vault_id)?;
+        let host_groups = self.list_host_groups_locked(&conn, &vault_id)?;
         let profiles = self.list_profiles_locked(&conn, &vault_id)?;
         let terminal_themes = self.list_terminal_themes_locked(&conn)?;
         let active_terminal_theme_id = self.get_setting_locked(&conn, ACTIVE_TERMINAL_THEME_KEY)?;
@@ -388,6 +446,14 @@ impl Storage {
                 name: vault.name,
             },
             credentials: export_credentials,
+            host_groups: host_groups
+                .into_iter()
+                .map(|group| ExportHostGroup {
+                    id: group.id,
+                    label: group.label,
+                    color_id: group.color_id,
+                })
+                .collect(),
             profiles: profiles
                 .into_iter()
                 .map(|profile| ExportProfile {
@@ -397,6 +463,7 @@ impl Storage {
                     host: profile.host,
                     port: profile.port,
                     username: profile.username,
+                    group_id: profile.group_id,
                     group: profile.group,
                     ssh_key_path: profile.ssh_key_path,
                 })
@@ -425,6 +492,8 @@ impl Storage {
         let vault_name = unique_import_name(&payload.vault.name);
         let now = now();
         let mut credential_id_map = HashMap::new();
+        let mut group_id_map = HashMap::new();
+        let mut group_label_map = HashMap::new();
         let mut theme_id_map = HashMap::new();
 
         let conn = self.conn.lock().expect("storage mutex poisoned");
@@ -456,6 +525,20 @@ impl Storage {
             }
         }
 
+        for group in &payload.host_groups {
+            let label = clean_required(group.label.clone(), "group label")?;
+            let color_id = clean_color_id(group.color_id.clone())
+                .unwrap_or_else(|_| default_group_color_id(&label));
+            let new_id = Uuid::new_v4().to_string();
+            group_id_map.insert(group.id.clone(), new_id.clone());
+            group_label_map.insert(label.clone(), new_id.clone());
+            conn.execute(
+                "INSERT INTO host_groups (id, vault_id, label, color_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![new_id, vault_id, label, color_id, now, now],
+            )?;
+        }
+
         for profile in &payload.profiles {
             let new_id = Uuid::new_v4().to_string();
             let credential_id = profile
@@ -463,11 +546,31 @@ impl Storage {
                 .as_ref()
                 .and_then(|id| credential_id_map.get(id))
                 .cloned();
+            let group = clean_optional(profile.group.clone());
+            let group_id = profile
+                .group_id
+                .as_ref()
+                .and_then(|id| group_id_map.get(id))
+                .cloned()
+                .or_else(|| {
+                    group
+                        .as_ref()
+                        .and_then(|label| group_label_map.get(label).cloned())
+                });
+            let group_id = match (group_id, group.as_deref()) {
+                (Some(group_id), _) => Some(group_id),
+                (None, Some(group)) => {
+                    let group_id = self.get_or_create_host_group_locked(&conn, &vault_id, group)?;
+                    group_label_map.insert(group.to_string(), group_id.clone());
+                    Some(group_id)
+                }
+                (None, None) => None,
+            };
 
             conn.execute(
                 "INSERT INTO profiles
-                 (id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 (id, vault_id, credential_id, name, host, port, username, group_id, group_name, ssh_key_path, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     new_id,
                     vault_id,
@@ -476,7 +579,8 @@ impl Storage {
                     profile.host,
                     i64::from(profile.port),
                     profile.username,
-                    clean_optional(profile.group.clone()),
+                    group_id,
+                    group,
                     clean_optional(profile.ssh_key_path.clone()),
                     now,
                     now
@@ -538,6 +642,17 @@ impl Storage {
                 FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS host_groups (
+                id TEXT PRIMARY KEY,
+                vault_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                color_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(vault_id, label),
+                FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS profiles (
                 id TEXT PRIMARY KEY,
                 vault_id TEXT NOT NULL,
@@ -546,12 +661,14 @@ impl Storage {
                 host TEXT NOT NULL,
                 port INTEGER NOT NULL,
                 username TEXT NOT NULL,
+                group_id TEXT,
                 group_name TEXT,
                 ssh_key_path TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE,
-                FOREIGN KEY (credential_id) REFERENCES credentials(id) ON DELETE SET NULL
+                FOREIGN KEY (credential_id) REFERENCES credentials(id) ON DELETE SET NULL,
+                FOREIGN KEY (group_id) REFERENCES host_groups(id) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS terminal_themes (
@@ -569,7 +686,9 @@ impl Storage {
             ",
         )?;
         ensure_profile_group_name_column(&conn)?;
+        ensure_profile_group_id_column(&conn)?;
         ensure_profile_ssh_key_path_column(&conn)?;
+        self.backfill_host_groups_locked(&conn)?;
         Ok(())
     }
 
@@ -646,9 +765,12 @@ impl Storage {
 
     fn get_profile_locked(&self, conn: &Connection, id: &str) -> AppResult<SshProfile> {
         conn.query_row(
-            "SELECT id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at
-             FROM profiles
-             WHERE id = ?1",
+            "SELECT p.id, p.vault_id, p.credential_id, p.name, p.host, p.port, p.username,
+                    p.group_id, COALESCE(g.label, p.group_name), g.color_id, p.ssh_key_path,
+                    p.created_at, p.updated_at
+             FROM profiles p
+             LEFT JOIN host_groups g ON g.id = p.group_id
+             WHERE p.id = ?1",
             params![id],
             map_profile,
         )
@@ -677,13 +799,98 @@ impl Storage {
         vault_id: &str,
     ) -> AppResult<Vec<SshProfile>> {
         let mut stmt = conn.prepare(
-            "SELECT id, vault_id, credential_id, name, host, port, username, group_name, ssh_key_path, created_at, updated_at
-             FROM profiles
-             WHERE vault_id = ?1
-             ORDER BY COALESCE(group_name, ''), name",
+            "SELECT p.id, p.vault_id, p.credential_id, p.name, p.host, p.port, p.username,
+                    p.group_id, COALESCE(g.label, p.group_name), g.color_id, p.ssh_key_path,
+                    p.created_at, p.updated_at
+             FROM profiles p
+             LEFT JOIN host_groups g ON g.id = p.group_id
+             WHERE p.vault_id = ?1
+             ORDER BY COALESCE(g.label, p.group_name, ''), p.name",
         )?;
         let rows = stmt.query_map(params![vault_id], map_profile)?;
         collect_rows(rows)
+    }
+
+    fn list_host_groups_locked(
+        &self,
+        conn: &Connection,
+        vault_id: &str,
+    ) -> AppResult<Vec<HostGroup>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, vault_id, label, color_id, created_at, updated_at
+             FROM host_groups
+             WHERE vault_id = ?1
+             ORDER BY label",
+        )?;
+        let rows = stmt.query_map(params![vault_id], map_host_group)?;
+        collect_rows(rows)
+    }
+
+    fn get_host_group_locked(&self, conn: &Connection, id: &str) -> AppResult<HostGroup> {
+        conn.query_row(
+            "SELECT id, vault_id, label, color_id, created_at, updated_at
+             FROM host_groups
+             WHERE id = ?1",
+            params![id],
+            map_host_group,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::InvalidInput("group not found".to_string()))
+    }
+
+    fn get_or_create_host_group_locked(
+        &self,
+        conn: &Connection,
+        vault_id: &str,
+        label: &str,
+    ) -> AppResult<String> {
+        let label = clean_required(label.to_string(), "group label")?;
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM host_groups WHERE vault_id = ?1 AND label = ?2",
+                params![vault_id, label],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let now = now();
+        let color_id = default_group_color_id(&label);
+        conn.execute(
+            "INSERT INTO host_groups (id, vault_id, label, color_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, vault_id, label, color_id, now, now],
+        )?;
+        Ok(id)
+    }
+
+    fn backfill_host_groups_locked(&self, conn: &Connection) -> AppResult<()> {
+        let groups = {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT vault_id, TRIM(group_name)
+                 FROM profiles
+                 WHERE group_id IS NULL AND group_name IS NOT NULL AND TRIM(group_name) != ''",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            collect_rows(rows)?
+        };
+
+        for (vault_id, label) in groups {
+            let group_id = self.get_or_create_host_group_locked(conn, &vault_id, &label)?;
+            conn.execute(
+                "UPDATE profiles
+                 SET group_id = ?1, group_name = ?2
+                 WHERE vault_id = ?3 AND group_id IS NULL AND TRIM(group_name) = ?2",
+                params![group_id, label, vault_id],
+            )?;
+        }
+
+        Ok(())
     }
 
     fn list_terminal_themes_locked(&self, conn: &Connection) -> AppResult<Vec<TerminalTheme>> {
@@ -765,6 +972,17 @@ fn map_credential(row: &Row<'_>) -> rusqlite::Result<Credential> {
     })
 }
 
+fn map_host_group(row: &Row<'_>) -> rusqlite::Result<HostGroup> {
+    Ok(HostGroup {
+        id: row.get(0)?,
+        vault_id: row.get(1)?,
+        label: row.get(2)?,
+        color_id: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
+}
+
 fn map_profile(row: &Row<'_>) -> rusqlite::Result<SshProfile> {
     let port = row.get::<_, i64>(5)?;
     Ok(SshProfile {
@@ -775,10 +993,12 @@ fn map_profile(row: &Row<'_>) -> rusqlite::Result<SshProfile> {
         host: row.get(4)?,
         port: u16::try_from(port).unwrap_or(22),
         username: row.get(6)?,
-        group: row.get(7)?,
-        ssh_key_path: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        group_id: row.get(7)?,
+        group: row.get(8)?,
+        group_color_id: row.get(9)?,
+        ssh_key_path: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -812,6 +1032,44 @@ fn clean_optional(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn clean_color_id(value: String) -> AppResult<String> {
+    let value = clean_required(value, "group color")?;
+    if GROUP_COLOR_IDS.contains(&value.as_str()) {
+        return Ok(value);
+    }
+
+    Err(AppError::InvalidInput("group color is invalid".to_string()))
+}
+
+fn default_group_color_id(label: &str) -> String {
+    let mut hash = 0u32;
+    for code in label.encode_utf16() {
+        hash = hash.wrapping_mul(31).wrapping_add(u32::from(code));
+    }
+    GROUP_COLOR_IDS[(hash as usize) % GROUP_COLOR_IDS.len()].to_string()
+}
+
+fn ensure_profile_group_id_column(conn: &Connection) -> AppResult<()> {
+    let has_column = {
+        let mut stmt = conn.prepare("PRAGMA table_info(profiles)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut has_column = false;
+        for column in columns {
+            if column? == "group_id" {
+                has_column = true;
+                break;
+            }
+        }
+        has_column
+    };
+
+    if !has_column {
+        conn.execute("ALTER TABLE profiles ADD COLUMN group_id TEXT", [])?;
+    }
+
+    Ok(())
 }
 
 fn ensure_profile_ssh_key_path_column(conn: &Connection) -> AppResult<()> {
@@ -860,7 +1118,9 @@ fn clean_json_object(value: String, field_name: &str) -> AppResult<String> {
     let value = clean_required(value, field_name)?;
     let json: serde_json::Value = serde_json::from_str(&value)?;
     if !json.is_object() {
-        return Err(AppError::InvalidInput(format!("{field_name} must be a JSON object")));
+        return Err(AppError::InvalidInput(format!(
+            "{field_name} must be a JSON object"
+        )));
     }
     Ok(value)
 }

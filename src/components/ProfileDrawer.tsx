@@ -2,6 +2,7 @@ import { Eye, EyeOff, LoaderCircle, Save, Trash2, X } from "lucide-react";
 import type { CSSProperties, FormEvent } from "react";
 import type { ProfileFormState } from "../appTypes";
 import { groupTagColor } from "../groupTags";
+import type { HostGroup } from "../types";
 import {
   ActionButton,
   DangerButton,
@@ -29,7 +30,7 @@ export function ProfileDrawer({
   editing: boolean;
   error: string;
   form: ProfileFormState;
-  groupOptions: string[];
+  groupOptions: HostGroup[];
   isBusy: boolean;
   passwordLoading: boolean;
   passwordVisible: boolean;
@@ -164,11 +165,12 @@ function GroupTagPicker({
   value,
 }: {
   onChange: (value: string) => void;
-  options: string[];
+  options: HostGroup[];
   value: string;
 }) {
   const selectedGroup = value.trim();
-  const color = groupTagColor(selectedGroup);
+  const selectedOption = options.find((option) => option.label === selectedGroup);
+  const color = groupTagColor(selectedGroup, selectedOption?.colorId);
 
   return (
     <div className="grid gap-2">
@@ -198,17 +200,17 @@ function GroupTagPicker({
       {options.length ? (
         <div className="flex flex-wrap gap-2">
           {options.map((option) => {
-            const selected = option === selectedGroup;
+            const selected = option.label === selectedGroup;
             return (
               <button
-                key={option}
+                key={option.id}
                 type="button"
                 aria-pressed={selected}
                 className="inline-flex h-7 max-w-full items-center rounded-md border px-2 text-xs font-semibold"
-                style={groupTagStyle(option, selected)}
-                onClick={() => onChange(option)}
+                style={groupTagStyle(option.label, selected, option.colorId)}
+                onClick={() => onChange(option.label)}
               >
-                <span className="truncate">{option}</span>
+                <span className="truncate">{option.label}</span>
               </button>
             );
           })}
@@ -218,8 +220,12 @@ function GroupTagPicker({
   );
 }
 
-function groupTagStyle(group: string, selected: boolean): CSSProperties {
-  const color = groupTagColor(group);
+function groupTagStyle(
+  group: string,
+  selected: boolean,
+  colorId?: string | null,
+): CSSProperties {
+  const color = groupTagColor(group, colorId);
   return {
     backgroundColor: selected ? color.background : `${color.background}99`,
     borderColor: selected ? color.text : color.border,

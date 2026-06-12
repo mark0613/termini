@@ -4,12 +4,12 @@ use crate::{
     error::command_result,
     models::{
         ConnectSshInput, CreateCredentialInput, CreateProfileInput, CreateTerminalThemeInput,
-        CreateVaultInput, Credential, ExportVaultInput, ImportVaultInput, ImportVaultResult,
-        LocalPathInput, LocalRenameInput, RemoteFileEntry, SetActiveTerminalThemeInput,
-        SftpPathInput, SftpRenameInput, SftpSessionInfo, SftpSessionInput, SftpTransferInfo,
-        SftpTransferInput, SshProfile, SshResizeInput, SshSessionInfo, SshSessionInput,
-        SshWriteInput, TerminalTheme, UpdateCredentialInput, UpdateProfileInput,
-        UpdateVaultInput, Vault,
+        CreateVaultInput, Credential, ExportVaultInput, HostGroup, ImportVaultInput,
+        ImportVaultResult, LocalPathInput, LocalRenameInput, RemoteFileEntry,
+        SetActiveTerminalThemeInput, SftpPathInput, SftpRenameInput, SftpSessionInfo,
+        SftpSessionInput, SftpTransferInfo, SftpTransferInput, SshProfile, SshResizeInput,
+        SshSessionInfo, SshSessionInput, SshWriteInput, TerminalTheme, UpdateCredentialInput,
+        UpdateHostGroupInput, UpdateProfileInput, UpdateVaultInput, Vault,
     },
     state::AppState,
 };
@@ -87,6 +87,26 @@ pub fn list_profiles(
     vault_id: String,
 ) -> Result<Vec<SshProfile>, String> {
     command_result(state.storage.list_profiles(&vault_id))
+}
+
+#[tauri::command]
+pub fn list_host_groups(
+    state: State<'_, AppState>,
+    vault_id: String,
+) -> Result<Vec<HostGroup>, String> {
+    command_result(state.storage.list_host_groups(&vault_id))
+}
+
+#[tauri::command]
+pub fn update_host_group(
+    state: State<'_, AppState>,
+    input: UpdateHostGroupInput,
+) -> Result<HostGroup, String> {
+    command_result(
+        state
+            .storage
+            .update_host_group(input.id, input.label, input.color_id),
+    )
 }
 
 #[tauri::command]

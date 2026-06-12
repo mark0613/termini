@@ -23,6 +23,17 @@ pub struct Credential {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HostGroup {
+    pub id: String,
+    pub vault_id: String,
+    pub label: String,
+    pub color_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SshProfile {
     pub id: String,
     pub vault_id: String,
@@ -31,7 +42,9 @@ pub struct SshProfile {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub group_id: Option<String>,
     pub group: Option<String>,
+    pub group_color_id: Option<String>,
     pub ssh_key_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -102,6 +115,14 @@ pub struct UpdateProfileInput {
     pub username: String,
     pub group: Option<String>,
     pub ssh_key_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateHostGroupInput {
+    pub id: String,
+    pub label: String,
+    pub color_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -307,6 +328,8 @@ pub struct ExportPayload {
     pub exported_at: String,
     pub vault: ExportVault,
     pub credentials: Vec<ExportCredential>,
+    #[serde(default)]
+    pub host_groups: Vec<ExportHostGroup>,
     pub profiles: Vec<ExportProfile>,
     #[serde(default)]
     pub terminal_themes: Vec<ExportTerminalTheme>,
@@ -332,6 +355,14 @@ pub struct ExportCredential {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExportHostGroup {
+    pub id: String,
+    pub label: String,
+    pub color_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportProfile {
     pub id: String,
     pub credential_id: Option<String>,
@@ -339,6 +370,8 @@ pub struct ExportProfile {
     pub host: String,
     pub port: u16,
     pub username: String,
+    #[serde(default)]
+    pub group_id: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]

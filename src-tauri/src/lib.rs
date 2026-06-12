@@ -47,6 +47,8 @@ pub fn run() {
             commands::delete_credential,
             commands::reveal_credential_password,
             commands::list_profiles,
+            commands::list_host_groups,
+            commands::update_host_group,
             commands::create_profile,
             commands::update_profile,
             commands::delete_profile,

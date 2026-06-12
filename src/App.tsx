@@ -17,6 +17,10 @@ import {
   type TabReorderPreview,
 } from "./components/AppHeader";
 import { AppSidebar } from "./components/AppSidebar";
+import {
+  HostGroupDrawer,
+  type HostGroupFormState,
+} from "./components/HostGroupDrawer";
 import { ProfileDrawer } from "./components/ProfileDrawer";
 import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import { preserveTerminalPaneRuntime } from "./components/TerminalPane";
@@ -56,6 +60,7 @@ import {
 } from "./terminalTree";
 import type {
   Credential,
+  HostGroup,
   RemoteFileEntry,
   SftpStatusEvent,
   SftpTransferInfo,
@@ -81,12 +86,20 @@ function App() {
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [activeVaultId, setActiveVaultId] = useState("");
   const [credentials, setCredentials] = useState<Credential[]>([]);
+  const [hostGroups, setHostGroups] = useState<HostGroup[]>([]);
   const [profiles, setProfiles] = useState<SshProfile[]>([]);
   const [profileForm, setProfileForm] =
     useState<ProfileFormState>(emptyProfileForm);
   const [editingProfileId, setEditingProfileId] = useState("");
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false);
   const [profileDrawerError, setProfileDrawerError] = useState("");
+  const [hostGroupDrawerOpen, setHostGroupDrawerOpen] = useState(false);
+  const [hostGroupDrawerError, setHostGroupDrawerError] = useState("");
+  const [editingHostGroupId, setEditingHostGroupId] = useState("");
+  const [hostGroupForm, setHostGroupForm] = useState<HostGroupFormState>({
+    label: "",
+    colorId: "green",
+  });
   const [profilePasswordVisible, setProfilePasswordVisible] = useState(false);
   const [profilePasswordLoading, setProfilePasswordLoading] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState("");
@@ -162,14 +175,10 @@ function App() {
   );
   const profileGroupOptions = useMemo(
     () =>
-      Array.from(
-        new Set(
-          profiles
-            .map((profile) => profile.group?.trim())
-            .filter((group): group is string => Boolean(group)),
-        ),
-      ).sort((left, right) => left.localeCompare(right)),
-    [profiles],
+      [...hostGroups].sort((left, right) =>
+        left.label.localeCompare(right.label),
+      ),
+    [hostGroups],
   );
   const filteredProfiles = useMemo(() => {
     const query = hostSearch.trim().toLowerCase();
@@ -256,6 +265,7 @@ function App() {
   useEffect(() => {
     if (!activeVaultId) {
       setCredentials([]);
+      setHostGroups([]);
       setProfiles([]);
       setSelectedProfileId("");
       return;
@@ -386,11 +396,13 @@ function App() {
   }
 
   async function refreshVaultData(vaultId: string) {
-    const [nextCredentials, nextProfiles] = await Promise.all([
+    const [nextCredentials, nextHostGroups, nextProfiles] = await Promise.all([
       api.listCredentials(vaultId),
+      api.listHostGroups(vaultId),
       api.listProfiles(vaultId),
     ]);
     setCredentials(nextCredentials);
+    setHostGroups(nextHostGroups);
     setProfiles(nextProfiles);
   }
 
@@ -1416,6 +1428,20 @@ function App() {
     }
   }
 
+  function openEditHostGroupDrawer(group: HostGroup) {
+    setEditingHostGroupId(group.id);
+    setHostGroupForm({ label: group.label, colorId: group.colorId });
+    setHostGroupDrawerError("");
+    setHostGroupDrawerOpen(true);
+  }
+
+  function closeHostGroupDrawer() {
+    setHostGroupDrawerOpen(false);
+    setEditingHostGroupId("");
+    setHostGroupForm({ label: "", colorId: "green" });
+    setHostGroupDrawerError("");
+  }
+
   function closeProfileDrawer() {
     setProfileDrawerOpen(false);
     setEditingProfileId("");
@@ -1438,6 +1464,34 @@ function App() {
     }
 
     await loadProfilePassword(profileForm.credentialId, true);
+  }
+
+  async function handleSaveHostGroup(event: FormEvent) {
+    event.preventDefault();
+    if (!activeVault || !editingHostGroupId) return;
+
+    const label = hostGroupForm.label.trim();
+    if (!label) {
+      setHostGroupDrawerError("Group label is required.");
+      return;
+    }
+
+    setIsBusy(true);
+    setError("");
+    setHostGroupDrawerError("");
+    try {
+      await api.updateHostGroup({
+        id: editingHostGroupId,
+        label,
+        colorId: hostGroupForm.colorId,
+      });
+      closeHostGroupDrawer();
+      await refreshVaultData(activeVault.id);
+    } catch (err) {
+      setHostGroupDrawerError(getErrorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   async function loadProfilePassword(credentialId: string, reveal: boolean) {
@@ -1795,12 +1849,14 @@ function App() {
               credentials={credentials}
               error={error}
               hostSearch={hostSearch}
+              hostGroups={hostGroups}
               isBusy={isBusy}
               profiles={filteredProfiles}
               selectedProfileId={selectedProfileId}
               onConnect={connectProfile}
               onDelete={handleDeleteProfile}
               onEdit={openEditProfileDrawer}
+              onEditGroup={openEditHostGroupDrawer}
               onOpenFiles={openSftpProfile}
               onNew={openNewProfileDrawer}
               onSearchChange={setHostSearch}
@@ -1937,6 +1993,17 @@ function App() {
             void toggleProfilePasswordVisibility();
           }}
           onSubmit={handleSaveProfile}
+        />
+      ) : null}
+
+      {hostGroupDrawerOpen ? (
+        <HostGroupDrawer
+          error={hostGroupDrawerError}
+          form={hostGroupForm}
+          isBusy={isBusy}
+          onChange={setHostGroupForm}
+          onClose={closeHostGroupDrawer}
+          onSubmit={handleSaveHostGroup}
         />
       ) : null}
 

@@ -15,6 +15,15 @@ export interface Credential {
   updatedAt: string;
 }
 
+export interface HostGroup {
+  id: string;
+  vaultId: string;
+  label: string;
+  colorId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SshProfile {
   id: string;
   vaultId: string;
@@ -23,7 +32,9 @@ export interface SshProfile {
   host: string;
   port: number;
   username: string;
+  groupId: string | null;
   group: string | null;
+  groupColorId: string | null;
   sshKeyPath: string | null;
   createdAt: string;
   updatedAt: string;

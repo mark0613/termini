@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   Credential,
+  HostGroup,
   ImportVaultResult,
   RemoteFileEntry,
   SftpSessionInfo,
@@ -59,6 +60,18 @@ export function revealCredentialPassword(id: string) {
 
 export function listProfiles(vaultId: string) {
   return invoke<SshProfile[]>("list_profiles", { vaultId });
+}
+
+export function listHostGroups(vaultId: string) {
+  return invoke<HostGroup[]>("list_host_groups", { vaultId });
+}
+
+export function updateHostGroup(input: {
+  id: string;
+  label: string;
+  colorId: string;
+}) {
+  return invoke<HostGroup>("update_host_group", { input });
 }
 
 export function createProfile(input: {
