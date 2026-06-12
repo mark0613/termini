@@ -13,7 +13,7 @@ const settingsRailItems: Array<{
   label: string;
   icon: LucideIcon;
 }> = [
-  { id: "data", label: "Data & Security", icon: Database },
+  { id: "data", label: "Data", icon: Database },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { id: "about", label: "About", icon: BookOpen },
