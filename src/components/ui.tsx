@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { Fragment } from "react";
 import type { HTMLAttributes, ReactNode } from "react";
 
 export function IconButton({
@@ -221,12 +222,33 @@ export function DangerButton({
 }
 
 export function ShortcutRow({ keys, label }: { keys: string; label: string }) {
+  const keyParts = parseShortcutKeys(keys);
+
   return (
     <div className="flex items-center justify-between border-b border-[#343a52] py-2 last:border-0">
       <span className="text-sm text-[#dfe4f7]">{label}</span>
-      <span className="rounded-md border border-[#3a4058] bg-[#1c2134] px-2 py-1 font-mono text-xs text-[#9ca4bf]">
-        {keys}
+      <span
+        aria-label={keys}
+        className="flex items-center gap-1.5 text-xs text-[#9ca4bf]"
+      >
+        {keyParts.map((key, index) => (
+          <Fragment key={`${key}-${index}`}>
+            {index > 0 ? (
+              <span className="font-mono text-[11px] text-[#6f7894]">+</span>
+            ) : null}
+            <span className="rounded-md border border-[#3a4058] bg-[#1c2134] px-2 py-1 font-mono text-xs text-[#c2c8da] shadow-[inset_0_-1px_0_rgba(255,255,255,0.05)]">
+              {key}
+            </span>
+          </Fragment>
+        ))}
       </span>
     </div>
+  );
+}
+
+function parseShortcutKeys(keys: string) {
+  const parts = keys.split("+");
+  return parts.flatMap((part, index) =>
+    part || index === parts.length - 1 ? [part || "+"] : [],
   );
 }
