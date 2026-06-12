@@ -52,6 +52,7 @@ import {
   type WorkspaceDropSide,
   updatePane,
   updatePaneBySession,
+  updateSplitRatio,
 } from "./terminalTree";
 import type {
   Credential,
@@ -1077,6 +1078,19 @@ function App() {
     );
   }
 
+  function resizeSplit(tabId: string, splitId: string, ratio: number) {
+    setTabs((current) =>
+      current.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              root: updateSplitRatio(tab.root, splitId, ratio),
+            }
+          : tab,
+      ),
+    );
+  }
+
   function handleTabDragStart(tabId: string, point: TabDragPoint) {
     const tab = tabs.find((item) => item.id === tabId);
     if (!tab) return;
@@ -1901,6 +1915,7 @@ function App() {
         }}
         onOpenFilesFromTerminal={openFilesFromTerminalPane}
         onOpenTerminalFromSftp={openTerminalFromSftpPane}
+        onResizeSplit={resizeSplit}
       />
 
       {profileDrawerOpen ? (

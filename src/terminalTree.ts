@@ -7,6 +7,9 @@ export type SftpSortField = "name" | "size" | "modified";
 export type SftpSortDirection = "asc" | "desc";
 
 export const DEFAULT_TERMINAL_FONT_SIZE = 15;
+export const DEFAULT_SPLIT_RATIO = 0.5;
+export const MIN_SPLIT_RATIO = 0.15;
+export const MAX_SPLIT_RATIO = 0.85;
 export const WORKSPACE_TAB_TITLE = "Workspace";
 
 export interface WorkspacePaneBase {
@@ -48,6 +51,7 @@ export interface SplitNodeState {
   type: "split";
   id: string;
   direction: SplitDirection;
+  ratio: number;
   children: [WorkspaceNode, WorkspaceNode];
 }
 
@@ -217,6 +221,7 @@ export function splitPane(
         type: "split",
         id: crypto.randomUUID(),
         direction,
+        ratio: DEFAULT_SPLIT_RATIO,
         children: [node, newPane],
       },
       newPaneId: newPane.id,
@@ -275,6 +280,7 @@ export function insertWorkspaceAtPane(
         type: "split",
         id: crypto.randomUUID(),
         direction,
+        ratio: DEFAULT_SPLIT_RATIO,
         children: insertedFirst ? [insertedNode, node] : [node, insertedNode],
       },
       inserted: true,
@@ -327,4 +333,34 @@ export function removePane(
   }
 
   return { node, removed: null };
+}
+
+export function updateSplitRatio(
+  node: WorkspaceNode,
+  splitId: string,
+  ratio: number,
+): WorkspaceNode {
+  if (node.type === "pane") {
+    return node;
+  }
+
+  if (node.id === splitId) {
+    return {
+      ...node,
+      ratio: clampSplitRatio(ratio),
+    };
+  }
+
+  return {
+    ...node,
+    children: [
+      updateSplitRatio(node.children[0], splitId, ratio),
+      updateSplitRatio(node.children[1], splitId, ratio),
+    ],
+  };
+}
+
+export function clampSplitRatio(ratio: number) {
+  if (!Number.isFinite(ratio)) return DEFAULT_SPLIT_RATIO;
+  return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
 }

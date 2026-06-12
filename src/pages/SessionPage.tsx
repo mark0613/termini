@@ -46,6 +46,7 @@ export function SessionPage({
   onSftpDelete,
   onOpenFilesFromTerminal,
   onOpenTerminalFromSftp,
+  onResizeSplit,
 }: {
   activeTabId: string;
   activeVault: Vault | null;
@@ -100,6 +101,7 @@ export function SessionPage({
   ) => void;
   onOpenFilesFromTerminal: (paneId: string) => void;
   onOpenTerminalFromSftp: (paneId: string) => void;
+  onResizeSplit: (tabId: string, splitId: string, ratio: number) => void;
 }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const emptyTab = activeTab
@@ -154,6 +156,9 @@ export function SessionPage({
                   onSftpDelete={onSftpDelete}
                   onOpenFilesFromTerminal={onOpenFilesFromTerminal}
                   onOpenTerminalFromSftp={onOpenTerminalFromSftp}
+                  onResizeSplit={(splitId, ratio) =>
+                    onResizeSplit(tab.id, splitId, ratio)
+                  }
                 />
               </div>
             );
