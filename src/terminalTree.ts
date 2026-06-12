@@ -6,7 +6,7 @@ export type SftpPanelSide = "local" | "remote";
 export type SftpSortField = "name" | "size" | "modified";
 export type SftpSortDirection = "asc" | "desc";
 
-export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+export const DEFAULT_TERMINAL_FONT_SIZE = 15;
 export const WORKSPACE_TAB_TITLE = "Workspace";
 
 export interface WorkspacePaneBase {
